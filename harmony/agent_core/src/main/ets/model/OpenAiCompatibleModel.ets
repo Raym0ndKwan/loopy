@@ -38,7 +38,7 @@ export class OpenAiCompatibleModel implements LocalModel {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'application/json'
         },
-        extraData: JSON.stringify(this.buildRequest(prompt, conversation)),
+        extraData: this.buildRequestJson(prompt, conversation),
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: 20000,
         readTimeout: 60000
@@ -84,6 +84,30 @@ export class OpenAiCompatibleModel implements LocalModel {
       messages,
       temperature: 0.2
     };
+  }
+
+  private buildRequestJson(prompt: string, conversation?: ConversationContext): string {
+    const baseJson = JSON.stringify(this.buildRequest(prompt, conversation));
+    const customJson = this.provider.customParametersJson.trim();
+    if (customJson.length === 0) {
+      return baseJson;
+    }
+    try {
+      const parsed = JSON.parse(customJson) as Object;
+      if (parsed === undefined || parsed === null || Array.isArray(parsed)) {
+        return baseJson;
+      }
+      if (customJson.search(/"model"\s*:/) >= 0 || customJson.search(/"messages"\s*:/) >= 0) {
+        return baseJson;
+      }
+      const normalizedCustomJson = JSON.stringify(parsed);
+      if (normalizedCustomJson.length <= 2) {
+        return baseJson;
+      }
+      return baseJson.substring(0, baseJson.length - 1) + ',' + normalizedCustomJson.substring(1);
+    } catch (_error) {
+      return baseJson;
+    }
   }
 
   private parseContent(body: string): string {

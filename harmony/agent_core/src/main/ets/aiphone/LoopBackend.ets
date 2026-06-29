@@ -131,7 +131,7 @@ export class LoopBackend {
 
   private buildModel(request: LoopBackendRequest): LocalModel {
     const settings = request.modelSettings;
-    const provider = new LlmProvider(settings.provider, settings.apiKey, settings.baseUrl, settings.model);
+    const provider = new LlmProvider(settings.provider, settings.apiKey, settings.baseUrl, settings.model, settings.customParametersJson);
     return provider.isConfigured() ? new OpenAiCompatibleModel(provider) : new ScriptedLocalModel();
   }
 

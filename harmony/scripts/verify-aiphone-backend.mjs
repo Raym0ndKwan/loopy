@@ -81,6 +81,8 @@ function runHarBuild() {
 
 function verifySourceContracts() {
   const protocol = read('harmony/agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
+  const llmProvider = read('harmony/agent_core/src/main/ets/model/LlmProvider.ets');
+  const openAiModel = read('harmony/agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
   const aiphoneA2ui = read('harmony/agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
   const definitions = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
@@ -91,6 +93,12 @@ function verifySourceContracts() {
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
+  assertContains(llmProvider, "endsWith('/v1/chat/completions')", 'model base URL can be full chat completions URL');
+  assertContains(llmProvider, "endsWith('/v1')", 'model base URL can be OpenAI v1 root');
+  assertContains(openAiModel, 'buildRequestJson', 'OpenAI-compatible model applies custom parameters');
+  assertContains(openAiModel, 'customParametersJson', 'OpenAI-compatible model reads custom parameter JSON');
+  assertContains(openAiModel, 'search(/"model"\\s*:/)', 'custom parameters cannot replace model');
+  assertContains(openAiModel, 'search(/"messages"\\s*:/)', 'custom parameters cannot replace messages');
   assertContains(aiphoneA2ui, 'export function aiphoneInfoJsonl', 'AIPhone final answer helper exists');
   assertContains(aiphoneA2ui, "component: 'InfoRows'", 'final answer helper renders InfoRows');
 
