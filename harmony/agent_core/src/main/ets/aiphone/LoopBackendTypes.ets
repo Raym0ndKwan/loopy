@@ -9,7 +9,7 @@ export interface LoopModelSettings {
 }
 
 export interface LoopMessage {
-  role: string;
+  role: 'user' | 'assistant';
   content: string;
 }
 

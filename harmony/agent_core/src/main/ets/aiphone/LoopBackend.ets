@@ -17,12 +17,17 @@ export class LoopBackend {
     let finalAnswer = '';
     let error = '';
     let raw = '';
-    let lastAction = '';
+    let lastAction: LoopToolTrace = { toolId: '', input: '', observation: '' };
 
     await runner.run(request.prompt, (event: AgentEvent): void => {
       raw += `${event.kind}: ${event.text}\n`;
-      if (callbacks.onEvent !== undefined) {
-        callbacks.onEvent(event);
+      try {
+        callbacks.onEvent?.(event);
+      } catch (callbackError) {
+        const message = callbackError instanceof Error ? callbackError.message : `${callbackError}`;
+        error = `Callback failed: ${message}`;
+        raw += `ERROR: ${error}\n`;
+        return;
       }
 
       if (event.kind === AgentEventKind.FINAL) {
@@ -30,11 +35,11 @@ export class LoopBackend {
       } else if (event.kind === AgentEventKind.ERROR) {
         error = event.text;
       } else if (event.kind === AgentEventKind.ACTION) {
-        lastAction = event.text;
+        lastAction = this.parseActionTrace(event.text);
       } else if (event.kind === AgentEventKind.OBSERVATION) {
         toolCalls.push({
-          toolId: lastAction,
-          input: '',
+          toolId: lastAction.toolId,
+          input: lastAction.input,
           observation: event.text
         });
       }
@@ -65,5 +70,18 @@ export class LoopBackend {
     const settings = request.modelSettings;
     const provider = new LlmProvider(settings.provider, settings.apiKey, settings.baseUrl, settings.model);
     return provider.isConfigured() ? new OpenAiCompatibleModel(provider) : new ScriptedLocalModel();
+  }
+
+  private parseActionTrace(action: string): LoopToolTrace {
+    const open = action.indexOf('(');
+    const close = action.lastIndexOf(')');
+    if (open <= 0 || close < open) {
+      return { toolId: action, input: '', observation: '' };
+    }
+    return {
+      toolId: action.substring(0, open).trim(),
+      input: action.substring(open + 1, close).trim(),
+      observation: ''
+    };
   }
 }
