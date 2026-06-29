@@ -12,7 +12,7 @@ export class UiTool implements AgentTool {
       'visualize, or build a card, form, or dashboard — not for plain text answers.';
   }
 
-  run(_input: string): string {
+  async run(_input: string): Promise<string> {
     return 'UI rendering is handled by the agent runtime.';
   }
 }

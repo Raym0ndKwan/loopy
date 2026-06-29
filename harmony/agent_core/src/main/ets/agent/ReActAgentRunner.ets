@@ -69,7 +69,7 @@ export class ReActAgentRunner {
       if (call.name === UI_TOOL_NAME) {
         observation = await this.runUiTool(call.input, listener);
       } else {
-        observation = this.tools.run(call.name, call.input);
+        observation = await this.tools.run(call.name, call.input);
       }
 
       scratchpad.push(response);
