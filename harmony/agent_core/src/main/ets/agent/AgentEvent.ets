@@ -2,6 +2,7 @@ export enum AgentEventKind {
   THOUGHT = 'THOUGHT',
   ACTION = 'ACTION',
   OBSERVATION = 'OBSERVATION',
+  UI = 'UI',
   FINAL = 'FINAL',
   ERROR = 'ERROR'
 }

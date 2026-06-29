@@ -1,7 +1,8 @@
 import http from '@ohos.net.http';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
-import { LocalModel } from './LocalModel';
-import { LlmProvider } from './LlmProvider';
+import { LlmProvider } from '../model/LlmProvider';
+import { AGENUI_CATALOG_ID, A2UI_VERSION } from './A2uiProtocol';
+import { A2uiModel } from './A2uiModel';
 
 interface ChatRequest {
   model: string;
@@ -17,14 +18,14 @@ interface ChatResponse {
   choices?: ChatChoice[];
 }
 
-export class OpenAiCompatibleModel implements LocalModel {
+export class OpenAiA2uiModel implements A2uiModel {
   private provider: LlmProvider;
 
   constructor(provider: LlmProvider) {
     this.provider = provider;
   }
 
-  async complete(prompt: string, conversation?: ConversationContext): Promise<string> {
+  async generate(userTask: string, surfaceId: string, conversation?: ConversationContext): Promise<string> {
     if (!this.provider.isConfigured()) {
       throw new Error('LLM provider is not configured.');
     }
@@ -38,10 +39,10 @@ export class OpenAiCompatibleModel implements LocalModel {
           'Content-Type': 'application/json; charset=utf-8',
           'Accept': 'application/json'
         },
-        extraData: JSON.stringify(this.buildRequest(prompt, conversation)),
+        extraData: JSON.stringify(this.buildRequest(userTask, surfaceId, conversation)),
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: 20000,
-        readTimeout: 60000
+        readTimeout: 120000
       });
 
       const statusCode = response.responseCode;
@@ -53,18 +54,33 @@ export class OpenAiCompatibleModel implements LocalModel {
       return this.parseContent(body);
     } catch (error) {
       const message = error instanceof Error ? error.message : `${error}`;
-      throw new Error(`LLM request failed: ${message}`);
+      throw new Error(`A2UI LLM request failed: ${message}`);
     } finally {
       httpRequest.destroy();
     }
   }
 
-  private buildRequest(prompt: string, conversation?: ConversationContext): ChatRequest {
+  private buildRequest(userTask: string, surfaceId: string, conversation?: ConversationContext): ChatRequest {
+    const exampleComponents =
+      `{"version":"${A2UI_VERSION}","updateComponents":{"surfaceId":"${surfaceId}",` +
+      `"components":[{"id":"root","component":"Card","child":"col"},` +
+      `{"id":"col","component":"Column","children":["title","body"],"align":"stretch"},` +
+      `{"id":"title","component":"Text","text":"Hello","variant":"h3"},` +
+      `{"id":"body","component":"Text","text":"Your message here","variant":"body"}]}}`;
+
+    const systemPrompt =
+      'You output A2UI v0.9 JSONL for a mobile UI renderer.\n' +
+      'Rules:\n' +
+      '- Output ONLY JSON lines. No markdown, no explanation.\n' +
+      `- Line 1: createSurface with surfaceId "${surfaceId}" and catalogId "${AGENUI_CATALOG_ID}"\n` +
+      '- Line 2: updateComponents with a flat components array and id "root"\n' +
+      '- Use only: Card, Column, Row, Text, Button, Divider\n' +
+      '- Text must use plain string "text", not markdown\n' +
+      '- Keep 4-8 components maximum\n' +
+      `Example line 2:\n${exampleComponents}`;
+
     const messages: ChatMessage[] = [
-      {
-        role: 'system',
-        content: 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool[input] or Final: answer. Use only listed tools. Use the ui tool when the user asks to show, display, or visualize something as an on-screen card or form; use Final for plain text replies.'
-      }
+      { role: 'system', content: systemPrompt }
     ];
 
     if (conversation !== undefined) {
@@ -76,7 +92,9 @@ export class OpenAiCompatibleModel implements LocalModel {
 
     messages.push({
       role: 'user',
-      content: prompt
+      content:
+        `Build a simple Card UI for: ${userTask}\n` +
+        'Include a title Text (variant h3) and body Text (variant body).'
     });
 
     return {

@@ -4,6 +4,9 @@ import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
 
 export type AgentListener = (event: AgentEvent) => void;
+export type UiRenderHandler = (description: string) => Promise<string[]>;
+
+const UI_TOOL_NAME = 'ui';
 
 class ToolCall {
   name: string;
@@ -19,11 +22,18 @@ export class ReActAgentRunner {
   private model: LocalModel;
   private tools: ToolRegistry;
   private maxSteps: number;
+  private uiHandler: UiRenderHandler | null;
 
-  constructor(model: LocalModel, tools: ToolRegistry, maxSteps: number) {
+  constructor(
+    model: LocalModel,
+    tools: ToolRegistry,
+    maxSteps: number,
+    uiHandler?: UiRenderHandler
+  ) {
     this.model = model;
     this.tools = tools;
     this.maxSteps = maxSteps;
+    this.uiHandler = uiHandler ?? null;
   }
 
   async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
@@ -54,7 +64,14 @@ export class ReActAgentRunner {
       }
 
       listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
-      const observation = this.tools.run(call.name, call.input);
+
+      let observation: string;
+      if (call.name === UI_TOOL_NAME) {
+        observation = await this.runUiTool(call.input, listener);
+      } else {
+        observation = this.tools.run(call.name, call.input);
+      }
+
       scratchpad.push(response);
       scratchpad.push(`Observation: ${observation}`);
       listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
@@ -63,9 +80,30 @@ export class ReActAgentRunner {
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
   }
 
+  private async runUiTool(description: string, listener: AgentListener): Promise<string> {
+    if (this.uiHandler === null) {
+      return 'UI rendering is not available in this session.';
+    }
+
+    const prompt = description.trim().length > 0 ? description : 'Simple information card';
+    try {
+      const lines = await this.uiHandler(prompt);
+      if (lines.length === 0) {
+        return 'UI tool returned no protocol data.';
+      }
+      listener(new AgentEvent(AgentEventKind.UI, lines.join('\n')));
+      return `Rendered on-screen UI (${lines.length} protocol lines) for: ${prompt}`;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      return `UI render failed: ${message}`;
+    }
+  }
+
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
-    let prompt = 'You are a local HarmonyOS ReAct agent.\n';
-    prompt += 'Use Thought, Action, Observation, and Final.\n\n';
+    let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
+    prompt += 'Use Thought, Action, Observation, and Final.\n';
+    prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
+    prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
       prompt += conversation.formatPriorConversation();

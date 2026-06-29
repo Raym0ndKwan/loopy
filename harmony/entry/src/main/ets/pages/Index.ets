@@ -1,25 +1,37 @@
+import { A2uiComponentDef } from '@loop/agent-core';
 import { common } from '@kit.AbilityKit';
 import {
   AgentEvent,
   AgentEventKind,
+  A2uiAgentRunner,
   ConversationContext,
+  createA2uiModelInfo,
   createLoopModelInfo,
+  createLoopToolRegistry,
+  parseJsonl,
   ReActAgentRunner,
-  ToolRegistry
+  ScriptedA2uiModel,
+  UiRenderHandler
 } from '@loop/agent-core';
+import { A2uiFallbackView } from '../agenui/A2uiFallbackView';
+import { hasRenderableRoot, parseComponentsFromJsonl } from '../agenui/A2uiFallbackParser';
+import { componentsFromUiEvent } from '../agenui/LoopUiApplier';
 
-const MAX_STEPS = 4;
+const MAX_STEPS = 6;
 
 @Entry
 @Component
 struct Index {
-  @State transcript: string = 'Loop is ready.\n';
+  @State transcript: string = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
   @State message: string = '';
   @State sending: boolean = false;
   @State modelStatus: string = 'Checking model…';
+  @State uiComponents: A2uiComponentDef[] = [];
+  @State hasUiPanel: boolean = false;
 
   private scroller: Scroller = new Scroller();
   private conversation: ConversationContext = new ConversationContext();
+  private lastUiTask: string = '';
 
   private getAbilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -27,11 +39,7 @@ struct Index {
 
   aboutToAppear(): void {
     createLoopModelInfo(this.getAbilityContext()).then((info) => {
-      if (info.mode === 'llm') {
-        this.modelStatus = `LLM: ${info.modelName}`;
-      } else {
-        this.modelStatus = 'Offline demo (no API key — add entry/.../rawfile/llm_config.json)';
-      }
+      this.updateModelStatus(info.mode, info.modelName);
     });
   }
 
@@ -56,6 +64,30 @@ struct Index {
       }
       .width('100%')
       .margin({ bottom: 8 })
+
+      if (this.hasUiPanel) {
+        Column() {
+          Text('On-screen UI')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+            .margin({ bottom: 6 })
+
+          Scroll() {
+            A2uiFallbackView({ components: this.uiComponents })
+              .width('100%')
+          }
+          .width('100%')
+          .height(220)
+        }
+        .width('100%')
+        .padding(12)
+        .margin({ bottom: 8 })
+        .borderRadius(12)
+        .backgroundColor(Color.White)
+        .border({ width: 1, color: $r('app.color.input_stroke') })
+      }
 
       Scroll(this.scroller) {
         Text(this.transcript)
@@ -120,20 +152,26 @@ struct Index {
 
     try {
       const modelInfo = await createLoopModelInfo(this.getAbilityContext());
-      if (modelInfo.mode === 'llm') {
-        this.modelStatus = `LLM: ${modelInfo.modelName}`;
-      } else {
-        this.modelStatus = 'Offline demo (no API key — add entry/.../rawfile/llm_config.json)';
-      }
+      this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
 
+      const uiHandler = await this.buildUiHandler();
       const runner = new ReActAgentRunner(
         modelInfo.model,
-        new ToolRegistry(),
-        MAX_STEPS
+        createLoopToolRegistry(),
+        MAX_STEPS,
+        uiHandler
       );
+
       await runner.run(task, (event: AgentEvent) => {
         if (event.kind === AgentEventKind.FINAL) {
           finalAnswer = event.text;
+        }
+        if (event.kind === AgentEventKind.ACTION && event.text.startsWith('ui(')) {
+          this.lastUiTask = this.extractToolInput(event.text);
+        }
+        if (event.kind === AgentEventKind.UI) {
+          const uiTask = this.lastUiTask.length > 0 ? this.lastUiTask : task;
+          this.applyUiPayload(event.text, uiTask);
         }
         this.addEvent(event);
       }, this.conversation);
@@ -146,9 +184,60 @@ struct Index {
     }
   }
 
+  private async buildUiHandler(): Promise<UiRenderHandler> {
+    const a2uiInfo = await createA2uiModelInfo(this.getAbilityContext());
+    const a2uiRunner = new A2uiAgentRunner(a2uiInfo.model);
+    const scripted = new ScriptedA2uiModel();
+
+    return async (description: string): Promise<string[]> => {
+      const lines: string[] = [];
+      const surfaceId = await a2uiRunner.run(
+        description,
+        (line: string) => {
+          lines.push(line);
+        },
+        (_message: string) => {
+          // errors surface as observation via empty lines + fallback below
+        }
+      );
+
+      if (surfaceId !== null && hasRenderableRoot(parseComponentsFromJsonl(lines))) {
+        return lines;
+      }
+
+      const fallbackRaw = await scripted.generate(description, surfaceId ?? 'loop_ui', undefined);
+      return parseJsonl(fallbackRaw);
+    };
+  }
+
+  private extractToolInput(actionText: string): string {
+    const open = actionText.indexOf('(');
+    const close = actionText.lastIndexOf(')');
+    if (open >= 0 && close > open) {
+      return actionText.substring(open + 1, close);
+    }
+    return actionText;
+  }
+
+  private applyUiPayload(jsonlPayload: string, fallbackTask: string): void {
+    this.uiComponents = componentsFromUiEvent(jsonlPayload, fallbackTask);
+    this.hasUiPanel = this.uiComponents.length > 0;
+  }
+
+  private updateModelStatus(mode: 'llm' | 'scripted', modelName: string): void {
+    if (mode === 'llm') {
+      this.modelStatus = `LLM: ${modelName}`;
+    } else {
+      this.modelStatus = 'Offline demo (no API key — add entry/.../rawfile/llm_config.json)';
+    }
+  }
+
   private clearConversation(): void {
     this.conversation.clear();
-    this.transcript = 'Loop is ready.\n';
+    this.transcript = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+    this.uiComponents = [];
+    this.hasUiPanel = false;
+    this.lastUiTask = '';
   }
 
   private addEvent(event: AgentEvent): void {
@@ -161,6 +250,9 @@ struct Index {
         break;
       case AgentEventKind.OBSERVATION:
         this.appendLine('Observation', event.text);
+        break;
+      case AgentEventKind.UI:
+        this.appendLine('UI', 'Updated on-screen panel above.');
         break;
       case AgentEventKind.FINAL:
         this.appendLine('Loop', event.text);

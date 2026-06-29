@@ -1,4 +1,5 @@
 import { AgentTool } from './AgentTool';
+import { UiTool } from './UiTool';
 
 class NoteTool implements AgentTool {
   name(): string {
@@ -56,4 +57,10 @@ export class ToolRegistry {
     }
     return tool.run(input ?? '');
   }
+}
+
+export function createLoopToolRegistry(): ToolRegistry {
+  const registry = new ToolRegistry();
+  registry.register(new UiTool());
+  return registry;
 }

@@ -6,6 +6,7 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@loop/agent-core": "file:../agent_core"
+    "@loop/agent-core": "file:../agent_core",
+    "@agenui/agenui": "file:../libs/agenui.har"
   }
 }

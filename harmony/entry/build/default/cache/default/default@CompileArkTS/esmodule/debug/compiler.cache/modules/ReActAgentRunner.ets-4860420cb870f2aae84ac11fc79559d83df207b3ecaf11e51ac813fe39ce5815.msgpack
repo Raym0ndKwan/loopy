@@ -1,311 +1,0 @@
-Ôr@Ÿªassertions¤code´customTransformCache¬dependencies¢id¤meta±moduleSideEffects¬originalCode±originalSourcemap«resolvedIds®sourcemapChainµsyntheticNamedExportsµtransformDependencies®transformFiles¨cacheAstÔrAÚimport { AgentEvent, AgentEventKind } from './AgentEvent';
-class ToolCall {
-    constructor(name, input) {
-        this.name = name;
-        this.input = input;
-    }
-}
-export class ReActAgentRunner {
-    constructor(model, tools, maxSteps) {
-        this.model = model;
-        this.tools = tools;
-        this.maxSteps = maxSteps;
-    }
-    async run(task, listener, conversation) {
-        const scratchpad = [];
-        for (let step = 0; step < this.maxSteps; step++) {
-            let response;
-            try {
-                response = await this.model.complete(this.buildPrompt(task, scratchpad, conversation), conversation);
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : `${error}`;
-                listener(new AgentEvent(AgentEventKind.ERROR, message));
-                return;
-            }
-            this.emitResponse(response, listener);
-            const finalAnswer = this.readLineValue(response, 'Final:');
-            if (finalAnswer !== null) {
-                listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
-                return;
-            }
-            const call = this.parseAction(response);
-            if (call === null) {
-                listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
-                return;
-            }
-            listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
-            const observation = this.tools.run(call.name, call.input);
-            scratchpad.push(response);
-            scratchpad.push(`Observation: ${observation}`);
-            listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
-        }
-        listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
-    }
-    buildPrompt(task, scratchpad, conversation) {
-        let prompt = 'You are a local HarmonyOS ReAct agent.\n';
-        prompt += 'Use Thought, Action, Observation, and Final.\n\n';
-        if (conversation !== undefined && !conversation.isEmpty()) {
-            prompt += conversation.formatPriorConversation();
-        }
-        prompt += 'Tools:\n';
-        prompt += this.tools.describeTools();
-        prompt += '\nUser task:\n';
-        prompt += task;
-        prompt += '\n\n';
-        for (const item of scratchpad) {
-            prompt += `${item}\n`;
-        }
-        return prompt;
-    }
-    emitResponse(response, listener) {
-        const thought = this.readLineValue(response, 'Thought:');
-        if (thought !== null) {
-            listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
-        }
-    }
-    readLineValue(text, prefix) {
-        const lines = text.split(/\r?\n/);
-        for (const line of lines) {
-            if (line.startsWith(prefix)) {
-                return line.substring(prefix.length).trim();
-            }
-        }
-        return null;
-    }
-    parseAction(response) {
-        const action = this.readLineValue(response, 'Action:');
-        if (action === null) {
-            return null;
-        }
-        const open = action.indexOf('[');
-        const close = action.lastIndexOf(']');
-        if (open <= 0 || close < open) {
-            return null;
-        }
-        const name = action.substring(0, open).trim();
-        const input = action.substring(open + 1, close).trim();
-        return new ToolCall(name, input);
-    }
-}
-//# sourceMappingURL=ReActAgentRunner.js.mapÂ‘Ùf/Users/raymondkwan/Documents/android_agentic_loop/harmony/agent_core/src/main/ets/agent/AgentEvent.etsÙl/Users/raymondkwan/Documents/android_agentic_loop/harmony/agent_core/src/main/ets/agent/ReActAgentRunner.etsÔrB›ªmoduleName±isLocalDependency¯isNodeEntryFile§pkgPath±belongProjectPath§pkgNameªpkgVersion±dependencyPkgInfo¯hostModulesInfo°belongModulePath¬shouldEmitJsªagent_coreÃÂÙD/Users/raymondkwan/Documents/android_agentic_loop/harmony/agent_coreÙ9/Users/raymondkwan/Documents/android_agentic_loop/harmony°@loop/agent-core¥1.0.0ÔrC’§pkgNameªpkgVersion°@loop/agent-core¥1.0.0‘ÔrD’²hostDependencyName®hostModuleNameÙ%./src/main/ets/agent/ReActAgentRunnerªagent_coreÙD/Users/raymondkwan/Documents/android_agentic_loop/harmony/agent_coreÃÃÚximport { AgentEvent, AgentEventKind } from './AgentEvent';
-import { ConversationContext } from './ConversationContext';
-import { ToolRegistry } from './ToolRegistry';
-import { LocalModel } from '../model/LocalModel';
-
-export type AgentListener = (event: AgentEvent) => void;
-
-class ToolCall {
-  name: string;
-  input: string;
-
-  constructor(name: string, input: string) {
-    this.name = name;
-    this.input = input;
-  }
-}
-
-export class ReActAgentRunner {
-  private model: LocalModel;
-  private tools: ToolRegistry;
-  private maxSteps: number;
-
-  constructor(model: LocalModel, tools: ToolRegistry, maxSteps: number) {
-    this.model = model;
-    this.tools = tools;
-    this.maxSteps = maxSteps;
-  }
-
-  async run(task: string, listener: AgentListener, conversation?: ConversationContext): Promise<void> {
-    const scratchpad: string[] = [];
-
-    for (let step = 0; step < this.maxSteps; step++) {
-      let response: string;
-      try {
-        response = await this.model.complete(this.buildPrompt(task, scratchpad, conversation), conversation);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : `${error}`;
-        listener(new AgentEvent(AgentEventKind.ERROR, message));
-        return;
-      }
-
-      this.emitResponse(response, listener);
-
-      const finalAnswer = this.readLineValue(response, 'Final:');
-      if (finalAnswer !== null) {
-        listener(new AgentEvent(AgentEventKind.FINAL, finalAnswer));
-        return;
-      }
-
-      const call = this.parseAction(response);
-      if (call === null) {
-        listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
-        return;
-      }
-
-      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
-      const observation = this.tools.run(call.name, call.input);
-      scratchpad.push(response);
-      scratchpad.push(`Observation: ${observation}`);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
-    }
-
-    listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
-  }
-
-  private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
-    let prompt = 'You are a local HarmonyOS ReAct agent.\n';
-    prompt += 'Use Thought, Action, Observation, and Final.\n\n';
-
-    if (conversation !== undefined && !conversation.isEmpty()) {
-      prompt += conversation.formatPriorConversation();
-    }
-
-    prompt += 'Tools:\n';
-    prompt += this.tools.describeTools();
-    prompt += '\nUser task:\n';
-    prompt += task;
-    prompt += '\n\n';
-
-    for (const item of scratchpad) {
-      prompt += `${item}\n`;
-    }
-    return prompt;
-  }
-
-  private emitResponse(response: string, listener: AgentListener): void {
-    const thought = this.readLineValue(response, 'Thought:');
-    if (thought !== null) {
-      listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
-    }
-  }
-
-  private readLineValue(text: string, prefix: string): string | null {
-    const lines = text.split(/\r?\n/);
-    for (const line of lines) {
-      if (line.startsWith(prefix)) {
-        return line.substring(prefix.length).trim();
-      }
-    }
-    return null;
-  }
-
-  private parseAction(response: string): ToolCall | null {
-    const action = this.readLineValue(response, 'Action:');
-    if (action === null) {
-      return null;
-    }
-
-    const open = action.indexOf('[');
-    const close = action.lastIndexOf(']');
-    if (open <= 0 || close < open) {
-      return null;
-    }
-
-    const name = action.substring(0, open).trim();
-    const input = action.substring(open + 1, close).trim();
-    return new ToolCall(name, input);
-  }
-}
-ÀÔrE‘¬./AgentEventÔrF—ªassertions¨external¢id¤meta±moduleSideEffectsªresolvedByµsyntheticNamedExportsAÂÙf/Users/raymondkwan/Documents/android_agentic_loop/harmony/agent_core/src/main/ets/agent/AgentEvent.etsAÃªoh-resolveÂ“ÔrG–§version¤fileªsourceRoot§sources¥names¨mappings³ReActAgentRunner.js ‘´ReActAgentRunner.etsÜ Zš”    ”  ”	  	”  ”  ”#  #”%  %”+  +”9  9”:  :“”   ” ” •” ” ” ” ” )—” ” ” 	” ” ” ” —” ” ” 	” ” ” ” ’” ” ‘” ””   ” ” ” —” ” ” ” !” 4” 6”& ÌF—” ” ” 	” ” ” ” —” ” ” 	” ” ” ” —” ” ” 	” ” ”  ”! ’” ” š” ”	 ”
- ” ” ” ” ” 1” 3”* ÌU–” ” 
-” ” !” #” $Ü ” ” 	” ” ” ” ” ” ”" ”& "”' #”/ +”1 -”5 1”7 3”9 5””  ”  
-”  ”  ’” !” !
-Ü ” "” "” "”! "”% "”& "”+ "#”, "$”4 ",”5 "-”9 "1”: "2”ÌE "=”ÌF ">”ÌJ "ÌB”ÌL "ÌD”ÌV "ÌN”ÌX "ÌP”Ìd "Ì\”Ìe "Ì]”Ìg "Ì_”Ìs "Ìk”Ìt "Ìl”Ìu "Ìm‘” #”” #” #” #” #Ü ” $” $” $”  $”% $”1 $)”6 $.”7 $/”8 $0”9 $1”> $6”? $7”ÌF $>”ÌG $?”ÌH $Ì@”ÌI $ÌA”ÌL $ÌD”ÌQ $ÌI”ÌS $ÌK”ÌT $ÌL” %” %” %” %”' %”( % ”6 %.”7 %/”< %4”> %6”ÌE %=”ÌF %>”ÌG %?”ÌH %Ì@’” &” &‘” 'š” )” )
-” )” )” )”& ) ”( )"”0 )*”1 )+”2 ),” +” +” +”  +”$ +”% +”2 +,”3 +-”; +5”= +7”ÌE +?”ÌF +Ì@”ÌG +ÌA–” ,” ,
-” ,”  ,”$ ,”& , ” -” -” -” -”' -”( - ”6 -.”7 -/”< -4”> -6”ÌI -ÌA”ÌJ -ÌB”ÌK -ÌC”ÌL -ÌD’” .” .‘” /›” 1” 1” 1” 1” 1” 1”) 1#”* 1$”2 1,”3 1-”4 1.–” 2” 2
-” 2” 2” 2” 2” 3” 3” 3” 3”' 3”( 3 ”6 3.”7 3/”< 34”> 36”Ìo 3Ìg”Ìp 3Ìh”Ìq 3Ìi”Ìr 3Ìj’” 4” 4‘” 5Ü ” 7” 7” 7” 7”# 7”$ 7”2 7,”3 7-”9 73”; 75”> 78”ÌB 7<”ÌC 7=”ÌG 7ÌA”ÌK 7ÌE”ÌO 7ÌI”ÌP 7ÌJ”ÌU 7ÌO”ÌX 7ÌR”ÌY 7ÌS”ÌZ 7ÌT”Ì[ 7ÌUÜ ” 8” 8” 8”  8”$ 8”% 8”* 8$”+ 8%”. 8(”/ 8)”3 8-”4 8.”8 82”: 84”> 88”? 89”ÌD 8>”ÌE 8?”ÌF 8Ì@˜” 9” 9” 9” 9” 9”$ 9”% 9”& 9 š” :” :” :” :” :”, :&”7 :1”9 :3”: :4”; :5” ;” ;” ;” ;”# ;”$ ;”2 ;,”3 ;-”> ;8”Ì@ ;:”ÌK ;ÌE”ÌL ;ÌF”ÌM ;ÌG”ÌN ;ÌH‘”	 <Ü ” >” >” >” >” >”  >”. >*”/ >+”4 >0”6 >2”ÌG >ÌC”ÌK >ÌG”ÌL >ÌH”ÌT >ÌP”Ìt >Ìp”Ìu >Ìq”Ìv >Ìr”Ìw >Ìs’” ?” ?˜” ÌA
-” ÌA” ÌA” ÌA"” ÌA$”  ÌA8”" ÌA:”. ÌAÌ\–” ÌB” ÌB” ÌB” ÌB”? ÌB;”Ì@ ÌB<•” ÌC” ÌC
-” ÌC”ÌD ÌCÌ@”ÌE ÌCÌAœ” ÌE” ÌE” ÌE” ÌE”& ÌE"”* ÌE&”+ ÌE'”7 ÌE3”8 ÌE4”? ÌE;”ÌA ÌE=”ÌC ÌE?˜” ÌF” ÌF” ÌF”" ÌF”# ÌF”: ÌF4”< ÌF6”= ÌF7‘”	 ÌG•” ÌI” ÌI
-” ÌI” ÌI” ÌIš” ÌJ” ÌJ
-” ÌJ” ÌJ” ÌJ” ÌJ” ÌJ”* ÌJ&”, ÌJ(”- ÌJ)•” ÌK” ÌK
-” ÌK”" ÌK”# ÌK•” ÌL” ÌL
-” ÌL” ÌL” ÌL•” ÌM” ÌM
-” ÌM” ÌM” ÌM—” ÌO” ÌO	” ÌO” ÌO” ÌO”% ÌO!”' ÌO#—” ÌP” ÌP” ÌP” ÌP” ÌP”! ÌP”" ÌP‘”	 ÌQ”” ÌR” ÌR” ÌR” ÌR’” ÌS” ÌS–” ÌU
-” ÌU” ÌU” ÌU'” ÌU)”# ÌUÌ@” ÌV” ÌV
-” ÌV” ÌV” ÌV” ÌV”* ÌV&”+ ÌV'”3 ÌV/”5 ÌV1”? ÌV;”Ì@ ÌV<”ÌA ÌV=–” ÌW” ÌW” ÌW” ÌW” ÌW” ÌW” ÌX” ÌX” ÌX” ÌX”# ÌX”$ ÌX”2 ÌX,”3 ÌX-”: ÌX4”< ÌX6”ÌC ÌX=”ÌD ÌX>”ÌE ÌX?”ÌF ÌXÌ@‘”	 ÌY’” ÌZ” ÌZ–” Ì\
-” Ì\” Ì\” Ì\$” Ì\&” Ì\4›” Ì]” Ì]
-” Ì]” Ì]” Ì]” Ì]”  Ì]”! Ì]”( Ì]$”) Ì]%”* Ì]&—” Ì^” Ì^	” Ì^” Ì^” Ì^”  Ì^”" Ì^™” Ì_” Ì_
-” Ì_” Ì_” Ì_”  Ì_”& Ì_ ”' Ì_!”) Ì_#” Ì`” Ì`” Ì`” Ì`”% Ì`”& Ì`”, Ì`$”- Ì`%”3 Ì`+”4 Ì`,”5 Ì`-”9 Ì`1”; Ì`3”< Ì`4‘” Ìa‘”	 Ìb”” Ìc” Ìc” Ìc” Ìc’” Ìd” Ìd”” Ìf
-” Ìf” Ìf” Ìf&” Ìg” Ìg
-” Ìg” Ìg” Ìg” Ìg”) Ìg%”* Ìg&”2 Ìg.”4 Ìg0”= Ìg9”> Ìg:”? Ìg;–” Ìh” Ìh” Ìh” Ìh” Ìh” Ìh”” Ìi” Ìi” Ìi” Ìi‘”	 Ìj›” Ìl” Ìl
-” Ìl” Ìl” Ìl” Ìl”# Ìl”$ Ìl ”' Ìl#”( Ìl$”) Ìl%›” Ìm” Ìm
-” Ìm” Ìm” Ìm” Ìm”( Ìm$”) Ìm%”, Ìm(”- Ìm)”. Ìm*š” Ìn” Ìn” Ìn” Ìn” Ìn” Ìn” Ìn”! Ìn”% Ìn!”' Ìn#”” Ìo” Ìo” Ìo” Ìo‘”	 ÌpÜ ” Ìr” Ìr
-” Ìr” Ìr” Ìr” Ìr”% Ìr!”& Ìr"”' Ìr#”) Ìr%”- Ìr)”. Ìr*”/ Ìr+”3 Ìr/”5 Ìr1”6 Ìr2Ü ” Ìs” Ìs
-” Ìs” Ìs” Ìs” Ìs”& Ìs"”' Ìs#”+ Ìs'”. Ìs*”/ Ìs+”1 Ìs-”6 Ìs2”7 Ìs3”8 Ìs4”< Ìs8”> Ìs:”? Ìs;š” Ìt” Ìt” Ìt” Ìt” Ìt”  Ìt”" Ìt”' Ìt#”( Ìt$”) Ìt%’” Ìu” Ìu‘” ÌvÔrH–§version¤file§sources®sourcesContent¥names¨mappingsÀ‘À‘ÀÜ [‘”    ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”  	 ‘”  
- ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”   ‘”    ‘”  ! ‘”  " ‘”  # ‘”  $ ‘”  % ‘”  & ‘”  ' ‘”  ( ‘”  ) ‘”  * ‘”  + ‘”  , ‘”  - ‘”  . ‘”  / ‘”  0 ‘”  1 ‘”  2 ‘”  3 ‘”  4 ‘”  5 ‘”  6 ‘”  7 ‘”  8 ‘”  9 ‘”  : ‘”  ; ‘”  < ‘”  = ‘”  > ‘”  ? ‘”  Ì@ ‘”  ÌA ‘”  ÌB ‘”  ÌC ‘”  ÌD ‘”  ÌE ‘”  ÌF ‘”  ÌG ‘”  ÌH ‘”  ÌI ‘”  ÌJ ‘”  ÌK ‘”  ÌL ‘”  ÌM ‘”  ÌN ‘”  ÌO ‘”  ÌP ‘”  ÌQ ‘”  ÌR ‘”  ÌS ‘”  ÌT ‘”  ÌU ‘”  ÌV ‘”  ÌW ‘”  ÌX ‘”  ÌY ‘”  ÌZ ÔrI’§missing¦pluginÃ¦genAbcÂÔ  ÔrJ”²dynamicImportCache¹exportAllDeclarationCache»exportNamedDeclarationCache«importCache‘ÔrK–¤type¥start£end«declarationªspecifiers¦source¶ExportNamedDeclarationÌ°ÍØÔrL–¤type¥start£end¢idªsuperClass¤body°ClassDeclarationÌ·ÍØÔrM”¤type¥start£end¤nameªIdentifierÌ½ÌÍ°ReActAgentRunnerÀÔrN”¤type¥start£end¤body©ClassBodyÌÎÍØ–ÔrO˜¤type¥start£end¦static¨computed£key¤kind¥value°MethodDefinitionÌÕÍ^ÂÂMªIdentifierÌÕÌà«constructor«constructorÔrP™¤type¥start£end¢idªexpression©generator¥async¦params¤body²FunctionExpressionÌàÍ^ÀÂÂÂ“MªIdentifierÌáÌæ¥modelMªIdentifierÌèÌí¥toolsMªIdentifierÌïÌ÷¨maxStepsN®BlockStatementÌùÍ^“ÔrQ”¤type¥start£endªexpression³ExpressionStatementÍÍÔrR–¤type¥start£end¨operator¤left¥right´AssignmentExpressionÍÍ¡=ÔrS—¤type¥start£end¦object¨property¨computed¨optional°MemberExpressionÍÍÔrT“¤type¥start£end®ThisExpressionÍÍMªIdentifierÍ	Í¥modelÂÂMªIdentifierÍÍ¥modelQ³ExpressionStatementÍ!Í4R´AssignmentExpressionÍ!Í3¡=S°MemberExpressionÍ!Í+T®ThisExpressionÍ!Í%MªIdentifierÍ&Í+¥toolsÂÂMªIdentifierÍ.Í3¥toolsQ³ExpressionStatementÍ>ÍWR´AssignmentExpressionÍ>ÍV¡=S°MemberExpressionÍ>ÍKT®ThisExpressionÍ>ÍBMªIdentifierÍCÍK¨maxStepsÂÂMªIdentifierÍNÍV¨maxStepsO°MethodDefinitionÍdÍwÂÂMªIdentifierÍjÍm£run¦methodP²FunctionExpressionÍmÍwÀÂÂÃ“MªIdentifierÍnÍr¤taskMªIdentifierÍtÍ|¨listenerMªIdentifierÍ~ÍŠ¬conversationN®BlockStatementÍŒÍw“ÔrU•¤type¥start£end¬declarations¤kind³VariableDeclarationÍ—Í­‘ÔrV•¤type¥start£end¢id¤init²VariableDeclaratorÍÍ¬MªIdentifierÍÍ§ªscratchpadÔrW”¤type¥start£end¨elements¯ArrayExpressionÍªÍ¬¥constÔrX—¤type¥start£end¤init¤test¦update¤body¬ForStatementÍ·Í÷U³VariableDeclarationÍ¼ÍÈ‘V²VariableDeclaratorÍÀÍÈMªIdentifierÍÀÍÄ¤stepÔrY•¤type¥start£end¥value£raw§LiteralÍÇÍÈ ¡0£letÔrZ–¤type¥start£end¤left¨operator¥right°BinaryExpressionÍÊÍŞMªIdentifierÍÊÍÎ¤step¡<S°MemberExpressionÍÑÍŞT®ThisExpressionÍÑÍÕMªIdentifierÍÖÍŞ¨maxStepsÂÂÔr[–¤type¥start£end¨operator¦prefix¨argument°UpdateExpressionÍàÍæ¢++ÂMªIdentifierÍàÍä¤stepN®BlockStatementÍèÍ÷œU³VariableDeclarationÍ÷Í‘V²VariableDeclaratorÍûÍMªIdentifierÍûÍ¨responseÀ£letÔr\–¤type¥start£end¥block§handler©finalizer¬TryStatementÍÍ‚N®BlockStatementÍÍ‘Q³ExpressionStatementÍ)ÍR´AssignmentExpressionÍ)Í¡=MªIdentifierÍ)Í1¨responseÔr]”¤type¥start£end¨argument¯AwaitExpressionÍ4ÍÔr^–¤type¥start£end¦callee©arguments¨optional®CallExpressionÍ:ÍS°MemberExpressionÍ:ÍMS°MemberExpressionÍ:ÍDT®ThisExpressionÍ:Í>MªIdentifierÍ?ÍD¥modelÂÂMªIdentifierÍEÍM¨completeÂÂ’^®CallExpressionÍNÍ~S°MemberExpressionÍNÍ^T®ThisExpressionÍNÍRMªIdentifierÍSÍ^«buildPromptÂÂ“MªIdentifierÍ_Íc¤taskMªIdentifierÍeÍoªscratchpadMªIdentifierÍqÍ}¬conversationÂMªIdentifierÍ€ÍŒ¬conversationÂÔr_•¤type¥start£end¥param¤body«CatchClauseÍ«Í‚MªIdentifierÍ²Í·¥errorN®BlockStatementÍ¹Í‚“U³VariableDeclarationÍÌÍ‘V²VariableDeclaratorÍÒÍMªIdentifierÍÒÍÙ§messageÔr`–¤type¥start£end¤testªconsequent©alternateµConditionalExpressionÍÜÍZ°BinaryExpressionÍÜÍòMªIdentifierÍÜÍá¥errorªinstanceofMªIdentifierÍíÍò¥ErrorS°MemberExpressionÍõÍMªIdentifierÍõÍú¥errorMªIdentifierÍûÍ§messageÂÂÔra•¤type¥start£end«expressions¦quasis¯TemplateLiteralÍÍ‘MªIdentifierÍÍ¥error’Ôrb•¤type¥start£end¥value¤tail¯TemplateElementÍÍÔrc’£raw¦cooked  Âb¯TemplateElementÍÍc  Ã¥constQ³ExpressionStatementÍ"ÍZ^®CallExpressionÍ"ÍYMªIdentifierÍ"Í*¨listener‘Ôrd•¤type¥start£end¦callee©arguments­NewExpressionÍ+ÍXMªIdentifierÍ/Í9ªAgentEvent’S°MemberExpressionÍ:ÍNMªIdentifierÍ:ÍH®AgentEventKindMªIdentifierÍIÍN¥ERRORÂÂMªIdentifierÍPÍW§messageÂ]¯ReturnStatementÍlÍsÀÀQ³ExpressionStatementÍÍ¶^®CallExpressionÍÍµS°MemberExpressionÍÍ¡T®ThisExpressionÍÍ”MªIdentifierÍ•Í¡¬emitResponseÂÂ’MªIdentifierÍ¢Íª¨responseMªIdentifierÍ¬Í´¨listenerÂU³VariableDeclarationÍÄÍÿ‘V²VariableDeclaratorÍÊÍşMªIdentifierÍÊÍÕ«finalAnswer^®CallExpressionÍØÍşS°MemberExpressionÍØÍêT®ThisExpressionÍØÍÜMªIdentifierÍİÍê­readLineValueÂÂ’MªIdentifierÍëÍó¨responseY§LiteralÍõÍı¦Final:¨'Final:'Â¥const`«IfStatementÍÍZ°BinaryExpressionÍÍ%MªIdentifierÍÍ«finalAnswer£!==Y§LiteralÍ!Í%À¤nullN®BlockStatementÍ'Í’Q³ExpressionStatementÍ:Ív^®CallExpressionÍ:ÍuMªIdentifierÍ:ÍB¨listener‘d­NewExpressionÍCÍtMªIdentifierÍGÍQªAgentEvent’S°MemberExpressionÍRÍfMªIdentifierÍRÍ`®AgentEventKindMªIdentifierÍaÍf¥FINALÂÂMªIdentifierÍhÍs«finalAnswerÂ]¯ReturnStatementÍˆÍÀÀU³VariableDeclarationÍ¬ÍÔ‘V²VariableDeclaratorÍ²ÍÓMªIdentifierÍ²Í¶¤call^®CallExpressionÍ¹ÍÓS°MemberExpressionÍ¹ÍÉT®ThisExpressionÍ¹Í½MªIdentifierÍ¾ÍÉ«parseActionÂÂ‘MªIdentifierÍÊÍÒ¨responseÂ¥const`«IfStatementÍâÍ’Z°BinaryExpressionÍæÍóMªIdentifierÍæÍê¤call£===Y§LiteralÍïÍóÀ¤nullN®BlockStatementÍõÍ’’Q³ExpressionStatementÍÍj^®CallExpressionÍÍiMªIdentifierÍÍ¨listener‘d­NewExpressionÍÍhMªIdentifierÍÍªAgentEvent’S°MemberExpressionÍ Í4MªIdentifierÍ Í.®AgentEventKindMªIdentifierÍ/Í4¥ERRORÂÂY§LiteralÍ6ÍgÙ/Model did not return an Action or Final answer.Ù1'Model did not return an Action or Final answer.'Â]¯ReturnStatementÍ|ÍƒÀÀQ³ExpressionStatementÍ Íï^®CallExpressionÍ ÍîMªIdentifierÍ Í¨¨listener‘d­NewExpressionÍ©ÍíMªIdentifierÍ­Í·ªAgentEvent’S°MemberExpressionÍ¸ÍÍMªIdentifierÍ¸ÍÆ®AgentEventKindMªIdentifierÍÇÍÍ¦ACTIONÂÂa¯TemplateLiteralÍÏÍì’S°MemberExpressionÍÒÍÛMªIdentifierÍÒÍÖ¤callMªIdentifierÍ×ÍÛ¤nameÂÂS°MemberExpressionÍßÍéMªIdentifierÍßÍã¤callMªIdentifierÍäÍé¥inputÂÂ“b¯TemplateElementÍĞÍĞc  Âb¯TemplateElementÍÜÍİc¡(¡(Âb¯TemplateElementÍêÍëc¡)¡)ÃÂU³VariableDeclarationÍıÍ7‘V²VariableDeclaratorÍÍ6MªIdentifierÍÍ«observation^®CallExpressionÍÍ6S°MemberExpressionÍÍS°MemberExpressionÍÍT®ThisExpressionÍÍMªIdentifierÍÍ¥toolsÂÂMªIdentifierÍÍ£runÂÂ’S°MemberExpressionÍ Í)MªIdentifierÍ Í$¤callMªIdentifierÍ%Í)¤nameÂÂS°MemberExpressionÍ+Í5MªIdentifierÍ+Í/¤callMªIdentifierÍ0Í5¥inputÂÂÂ¥constQ³ExpressionStatementÍEÍ_^®CallExpressionÍEÍ^S°MemberExpressionÍEÍTMªIdentifierÍEÍOªscratchpadMªIdentifierÍPÍT¤pushÂÂ‘MªIdentifierÍUÍ]¨responseÂQ³ExpressionStatementÍmÍœ^®CallExpressionÍmÍ›S°MemberExpressionÍmÍ|MªIdentifierÍmÍwªscratchpadMªIdentifierÍxÍ|¤pushÂÂ‘a¯TemplateLiteralÍ}Íš‘MªIdentifierÍÍ˜«observation’b¯TemplateElementÍ~Í‹c­Observation: ­Observation: Âb¯TemplateElementÍ™Í™c  ÃÂQ³ExpressionStatementÍªÍì^®CallExpressionÍªÍëMªIdentifierÍªÍ²¨listener‘d­NewExpressionÍ³ÍêMªIdentifierÍ·ÍÁªAgentEvent’S°MemberExpressionÍÂÍÜMªIdentifierÍÂÍĞ®AgentEventKindMªIdentifierÍÑÍÜ«OBSERVATIONÂÂMªIdentifierÍŞÍé«observationÂQ³ExpressionStatementÍÍp^®CallExpressionÍÍoMªIdentifierÍÍ	¨listener‘d­NewExpressionÍ
-ÍnMªIdentifierÍÍªAgentEvent’S°MemberExpressionÍÍ-MªIdentifierÍÍ'®AgentEventKindMªIdentifierÍ(Í-¥ERRORÂÂa¯TemplateLiteralÍ/Ím‘S°MemberExpressionÍ@ÍMT®ThisExpressionÍ@ÍDMªIdentifierÍEÍM¨maxStepsÂÂ’b¯TemplateElementÍ0Í>c®Stopped after ®Stopped after Âb¯TemplateElementÍNÍlc¾ steps without a final answer.¾ steps without a final answer.ÃÂO°MethodDefinitionÍ}Í	âÂÂMªIdentifierÍ}Íˆ«buildPrompt¦methodP²FunctionExpressionÍˆÍ	âÀÂÂÂ“MªIdentifierÍ‰Í¤taskMªIdentifierÍÍ™ªscratchpadMªIdentifierÍ›Í§¬conversationN®BlockStatementÍ©Í	âšU³VariableDeclarationÍ´Íì‘V²VariableDeclaratorÍ¸ÍëMªIdentifierÍ¸Í¾¦promptY§LiteralÍÁÍëÙ'You are a local HarmonyOS ReAct agent.
-Ù*'You are a local HarmonyOS ReAct agent.\n'£letQ³ExpressionStatementÍöÍ3R´AssignmentExpressionÍöÍ2¢+=MªIdentifierÍöÍü¦promptY§LiteralÍ Í2Ù.Use Thought, Action, Observation, and Final.
-
-Ù2'Use Thought, Action, Observation, and Final.\n\n'`«IfStatementÍ=ÍÃZ±LogicalExpressionÍAÍvZ°BinaryExpressionÍAÍ[MªIdentifierÍAÍM¬conversation£!==MªIdentifierÍRÍ[©undefined¢&&[¯UnaryExpressionÍ_Ív¡!Ã^®CallExpressionÍ`ÍvS°MemberExpressionÍ`ÍtMªIdentifierÍ`Íl¬conversationMªIdentifierÍmÍt§isEmptyÂÂÂN®BlockStatementÍxÍÃ‘Q³ExpressionStatementÍ‡Í¸R´AssignmentExpressionÍ‡Í·¢+=MªIdentifierÍ‡Í¦prompt^®CallExpressionÍ‘Í·S°MemberExpressionÍ‘ÍµMªIdentifierÍ‘Í¬conversationMªIdentifierÍÍµ·formatPriorConversationÂÂÂÀQ³ExpressionStatementÍÍÍâR´AssignmentExpressionÍÍÍá¢+=MªIdentifierÍÍÍÓ¦promptY§LiteralÍ×Íá§Tools:
-ª'Tools:\n'Q³ExpressionStatementÍìÍ	R´AssignmentExpressionÍìÍ	¢+=MªIdentifierÍìÍò¦prompt^®CallExpressionÍöÍ	S°MemberExpressionÍöÍ	S°MemberExpressionÍöÍ	 T®ThisExpressionÍöÍúMªIdentifierÍûÍ	 ¥toolsÂÂMªIdentifierÍ	Í	­describeToolsÂÂÂQ³ExpressionStatementÍ	Í	6R´AssignmentExpressionÍ	Í	5¢+=MªIdentifierÍ	Í	!¦promptY§LiteralÍ	%Í	5¬
-User task:
-°'\nUser task:\n'Q³ExpressionStatementÍ	@Í	OR´AssignmentExpressionÍ	@Í	N¢+=MªIdentifierÍ	@Í	F¦promptMªIdentifierÍ	JÍ	N¤taskQ³ExpressionStatementÍ	YÍ	jR´AssignmentExpressionÍ	YÍ	i¢+=MªIdentifierÍ	YÍ	_¦promptY§LiteralÍ	cÍ	i¢
-
-¦'\n\n'Ôre—¤type¥start£end¥await¤left¥right¤body®ForOfStatementÍ	tÍ	ÃÂU³VariableDeclarationÍ	yÍ	ƒ‘V²VariableDeclaratorÍ	Í	ƒMªIdentifierÍ	Í	ƒ¤itemÀ¥constMªIdentifierÍ	‡Í	‘ªscratchpadN®BlockStatementÍ	“Í	Ã‘Q³ExpressionStatementÍ	¢Í	¸R´AssignmentExpressionÍ	¢Í	·¢+=MªIdentifierÍ	¢Í	¨¦prompta¯TemplateLiteralÍ	¬Í	·‘MªIdentifierÍ	¯Í	³¤item’b¯TemplateElementÍ	­Í	­c  Âb¯TemplateElementÍ	´Í	¶c¢\n¡
-Ã]¯ReturnStatementÍ	ÍÍ	ÛMªIdentifierÍ	ÔÍ	Ú¦promptO°MethodDefinitionÍ	èÍ
-ÈÂÂMªIdentifierÍ	èÍ	ô¬emitResponse¦methodP²FunctionExpressionÍ	ôÍ
-ÈÀÂÂÂ’MªIdentifierÍ	õÍ	ı¨responseMªIdentifierÍ	ÿÍ
-¨listenerN®BlockStatementÍ
-	Í
-È’U³VariableDeclarationÍ
-Í
-M‘V²VariableDeclaratorÍ
-Í
-LMªIdentifierÍ
-Í
-!§thought^®CallExpressionÍ
-$Í
-LS°MemberExpressionÍ
-$Í
-6T®ThisExpressionÍ
-$Í
-(MªIdentifierÍ
-)Í
-6­readLineValueÂÂ’MªIdentifierÍ
-7Í
-?¨responseY§LiteralÍ
-AÍ
-K¨Thought:ª'Thought:'Â¥const`«IfStatementÍ
-WÍ
-ÁZ°BinaryExpressionÍ
-[Í
-kMªIdentifierÍ
-[Í
-b§thought£!==Y§LiteralÍ
-gÍ
-kÀ¤nullN®BlockStatementÍ
-mÍ
-Á‘Q³ExpressionStatementÍ
-|Í
-¶^®CallExpressionÍ
-|Í
-µMªIdentifierÍ
-|Í
-„¨listener‘d­NewExpressionÍ
-…Í
-´MªIdentifierÍ
-‰Í
-“ªAgentEvent’S°MemberExpressionÍ
-”Í
-ªMªIdentifierÍ
-”Í
-¢®AgentEventKindMªIdentifierÍ
-£Í
-ª§THOUGHTÂÂMªIdentifierÍ
-¬Í
-³§thoughtÂÀO°MethodDefinitionÍ
-ÎÍİÂÂMªIdentifierÍ
-ÎÍ
-Û­readLineValue¦methodP²FunctionExpressionÍ
-ÛÍİÀÂÂÂ’MªIdentifierÍ
-ÜÍ
-à¤textMªIdentifierÍ
-âÍ
-è¦prefixN®BlockStatementÍ
-êÍİ“U³VariableDeclarationÍ
-õÍ‘V²VariableDeclaratorÍ
-ûÍMªIdentifierÍ
-ûÍ ¥lines^®CallExpressionÍÍS°MemberExpressionÍÍMªIdentifierÍÍ¤textMªIdentifierÍÍ¥splitÂÂ‘Ôrf–¤type¥start£end¥value£raw¥regex§LiteralÍÍ’¥\r?\n §/\r?\n/Ôrg’§pattern¥flags¥\r?\n Â¥conste®ForOfStatementÍ!ÍÀÂU³VariableDeclarationÍ&Í0‘V²VariableDeclaratorÍ,Í0MªIdentifierÍ,Í0¤lineÀ¥constMªIdentifierÍ4Í9¥linesN®BlockStatementÍ;ÍÀ‘`«IfStatementÍJÍµ^®CallExpressionÍNÍeS°MemberExpressionÍNÍ]MªIdentifierÍNÍR¤lineMªIdentifierÍSÍ]ªstartsWithÂÂ‘MªIdentifierÍ^Íd¦prefixÂN®BlockStatementÍgÍµ‘]¯ReturnStatementÍzÍ¦^®CallExpressionÍÍ¥S°MemberExpressionÍÍ£^®CallExpressionÍÍS°MemberExpressionÍÍMªIdentifierÍÍ…¤lineMªIdentifierÍ†Í©substringÂÂ‘S°MemberExpressionÍÍMªIdentifierÍÍ–¦prefixMªIdentifierÍ—Í¦lengthÂÂÂMªIdentifierÍŸÍ£¤trimÂÂÂÀ]¯ReturnStatementÍÊÍÖY§LiteralÍÑÍÕÀ¤nullO°MethodDefinitionÍãÍÕÂÂMªIdentifierÍãÍî«parseAction¦methodP²FunctionExpressionÍîÍÕÀÂÂÂ‘MªIdentifierÍïÍ÷¨responseN®BlockStatementÍùÍÕ˜U³VariableDeclarationÍÍ;‘V²VariableDeclaratorÍ
-Í:MªIdentifierÍ
-Í¦action^®CallExpressionÍÍ:S°MemberExpressionÍÍ%T®ThisExpressionÍÍMªIdentifierÍÍ%­readLineValueÂÂ’MªIdentifierÍ&Í.¨responseY§LiteralÍ0Í9§Action:©'Action:'Â¥const`«IfStatementÍEÍ€Z°BinaryExpressionÍIÍXMªIdentifierÍIÍO¦action£===Y§LiteralÍTÍXÀ¤nullN®BlockStatementÍZÍ€‘]¯ReturnStatementÍiÍuY§LiteralÍpÍtÀ¤nullÀU³VariableDeclarationÍŠÍ«‘V²VariableDeclaratorÍÍªMªIdentifierÍÍ”¤open^®CallExpressionÍ—ÍªS°MemberExpressionÍ—Í¥MªIdentifierÍ—Í¦actionMªIdentifierÍÍ¥§indexOfÂÂ‘Y§LiteralÍ¦Í©¡[£'['Â¥constU³VariableDeclarationÍµÍÛ‘V²VariableDeclaratorÍ»ÍÚMªIdentifierÍ»ÍÀ¥close^®CallExpressionÍÃÍÚS°MemberExpressionÍÃÍÕMªIdentifierÍÃÍÉ¦actionMªIdentifierÍÊÍÕ«lastIndexOfÂÂ‘Y§LiteralÍÖÍÙ¡]£']'Â¥const`«IfStatementÍåÍ*Z±LogicalExpressionÍéÍZ°BinaryExpressionÍéÍòMªIdentifierÍéÍí¤open¢<=Y§LiteralÍñÍò ¡0¢||Z°BinaryExpressionÍöÍMªIdentifierÍöÍû¥close¡<MªIdentifierÍşÍ¤openN®BlockStatementÍÍ*‘]¯ReturnStatementÍÍY§LiteralÍÍÀ¤nullÀU³VariableDeclarationÍ4Íb‘V²VariableDeclaratorÍ:ÍaMªIdentifierÍ:Í>¤name^®CallExpressionÍAÍaS°MemberExpressionÍAÍ_^®CallExpressionÍAÍZS°MemberExpressionÍAÍQMªIdentifierÍAÍG¦actionMªIdentifierÍHÍQ©substringÂÂ’Y§LiteralÍRÍS ¡0MªIdentifierÍUÍY¤openÂMªIdentifierÍ[Í_¤trimÂÂÂ¥constU³VariableDeclarationÍlÍ£‘V²VariableDeclaratorÍrÍ¢MªIdentifierÍrÍw¥input^®CallExpressionÍzÍ¢S°MemberExpressionÍzÍ ^®CallExpressionÍzÍ›S°MemberExpressionÍzÍŠMªIdentifierÍzÍ€¦actionMªIdentifierÍÍŠ©substringÂÂ’Z°BinaryExpressionÍ‹Í“MªIdentifierÍ‹Í¤open¡+Y§LiteralÍ’Í“¡1MªIdentifierÍ•Íš¥closeÂMªIdentifierÍœÍ ¤trimÂÂÂ¥const]¯ReturnStatementÍ­ÍÎd­NewExpressionÍ´ÍÍMªIdentifierÍ¸ÍÀ¨ToolCall’MªIdentifierÍÁÍÅ¤nameMªIdentifierÍÇÍÌ¥inputÀ‘Ôrh•¤type¥start£endªspecifiers¦source±ImportDeclaration :’Ôri•¤type¥start£end¨imported¥local¯ImportSpecifier	MªIdentifier	ªAgentEventMªIdentifier	ªAgentEventi¯ImportSpecifier#MªIdentifier#®AgentEventKindMªIdentifier#®AgentEventKindY§Literal+9¬./AgentEvent®'./AgentEvent'

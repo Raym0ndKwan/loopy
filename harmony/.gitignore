@@ -1,0 +1,23 @@
+# Build outputs
+**/build/
+**/.preview/
+*.hap
+
+# DevEco / hvigor (generated)
+.hvigor/
+
+# IDE
+.idea/
+
+# Dependencies (restore via ohpm install / fetch-agenui.sh)
+oh_modules/
+entry/oh_modules/
+
+# Local secrets — use llm_config.example.json
+**/rawfile/llm_config.json
+
+# AGenUI HAR (fetch via scripts/fetch-agenui.sh)
+libs/*.har
+
+# OS
+.DS_Store
