@@ -69,7 +69,7 @@ export class OpenAiA2uiModel implements A2uiModel {
       `{"id":"body","component":"Text","text":"Your message here","variant":"body"}]}}`;
 
     const systemPrompt =
-      'You output A2UI v0.9 JSONL for a mobile UI renderer.\n' +
+      `You output A2UI ${A2UI_VERSION} JSONL for a mobile UI renderer.\n` +
       'Rules:\n' +
       '- Output ONLY JSON lines. No markdown, no explanation.\n' +
       `- Line 1: createSurface with surfaceId "${surfaceId}" and catalogId "${AGENUI_CATALOG_ID}"\n` +
