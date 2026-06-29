@@ -17,6 +17,23 @@ HarmonyOS NEXT port of the Loop ReAct agent starter. Matches the Android app:
 
 If `ohpm install` fails looking for `@ohos/hvigor`, that package ships with DevEco Studio and must **not** be listed in `oh-package.json5` `devDependencies`. Use **File → Sync and Refresh Project** instead.
 
+## AIPhone backend verification
+
+Run the Loopy-side smoke before wiring this HAR into AIPhoneDemo:
+
+```bash
+cd harmony
+DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
+  node scripts/verify-aiphone-backend.mjs
+```
+
+The smoke builds the `agent_core` HAR and checks the AIPhone contract in this repo:
+
+- `LoopBackend` registers the AIPhone tool definitions and `dynamic.search`.
+- Tool output is emitted as AIPhone A2UI JSONL lines.
+- Unsafe send tools are blocked instead of auto-executed.
+- Providers not yet migrated return explicit error A2UI instead of mock data.
+
 ## LLM provider config
 
 Harmony reads provider settings from a raw resource file:
