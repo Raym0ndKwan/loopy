@@ -7,7 +7,7 @@ import { LlmProvider } from '../model/LlmProvider';
 import { LocalModel } from '../model/LocalModel';
 import { OpenAiCompatibleModel } from '../model/OpenAiCompatibleModel';
 import { ScriptedLocalModel } from '../model/ScriptedLocalModel';
-import { splitJsonl } from './AiphoneA2ui';
+import { aiphoneInfoJsonl, splitJsonl } from './AiphoneA2ui';
 import { allToolDefinitions, ToolDefinition } from './AiphoneToolDefinitions';
 import { runAiphoneTool } from './AiphoneToolExecutor';
 import { LoopBackendCallbacks, LoopBackendRequest, LoopRunResult, LoopToolTrace } from './LoopBackendTypes';
@@ -52,7 +52,15 @@ export class LoopBackend {
   async run(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): Promise<LoopRunResult> {
     const conversation = this.buildConversation(request);
     const model = this.buildModel(request);
-    const runner = new ReActAgentRunner(model, this.buildToolRegistry(request, callbacks), request.maxSteps > 0 ? request.maxSteps : 6);
+    let a2uiLineCount = 0;
+    const a2uiCallbacks: LoopBackendCallbacks = {
+      onEvent: callbacks.onEvent,
+      onA2uiJsonl: (line: string): void => {
+        a2uiLineCount++;
+        callbacks.onA2uiJsonl?.(line);
+      }
+    };
+    const runner = new ReActAgentRunner(model, this.buildToolRegistry(request, a2uiCallbacks), request.maxSteps > 0 ? request.maxSteps : 6);
     const toolCalls: LoopToolTrace[] = [];
     let finalAnswer = '';
     let error = '';
@@ -72,6 +80,21 @@ export class LoopBackend {
 
       if (event.kind === AgentEventKind.FINAL) {
         finalAnswer = event.text;
+        if (a2uiLineCount === 0) {
+          const jsonl = aiphoneInfoJsonl(request.surfaceId, 'Appless Phone', event.text);
+          raw += `A2UI: ${jsonl}`;
+          for (const line of splitJsonl(jsonl)) {
+            try {
+              a2uiLineCount++;
+              callbacks.onA2uiJsonl?.(line);
+            } catch (callbackError) {
+              const message = callbackError instanceof Error ? callbackError.message : `${callbackError}`;
+              error = `Callback failed: ${message}`;
+              raw += `ERROR: ${error}\n`;
+              return;
+            }
+          }
+        }
       } else if (event.kind === AgentEventKind.ERROR) {
         error = event.text;
       } else if (event.kind === AgentEventKind.ACTION) {

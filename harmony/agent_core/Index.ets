@@ -16,7 +16,7 @@ export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener } from './src/main
 export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiModelFactory';
 export { LoopBackend } from './src/main/ets/aiphone/LoopBackend';
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
-export { aiphoneErrorJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
+export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
 export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel, allToolDefinitions, aiphoneToolDefinitionCount, isKnownDomainToolId, isRegisteredAiphoneToolId, toolDefinitionForToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, LocalProviderConfig, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';

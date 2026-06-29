@@ -81,6 +81,7 @@ function runHarBuild() {
 
 function verifySourceContracts() {
   const protocol = read('harmony/agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
+  const aiphoneA2ui = read('harmony/agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
   const definitions = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const backend = read('harmony/agent_core/src/main/ets/aiphone/LoopBackend.ets');
@@ -90,6 +91,8 @@ function verifySourceContracts() {
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
+  assertContains(aiphoneA2ui, 'export function aiphoneInfoJsonl', 'AIPhone final answer helper exists');
+  assertContains(aiphoneA2ui, "component: 'InfoRows'", 'final answer helper renders InfoRows');
 
   const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
@@ -147,9 +150,12 @@ function verifySourceContracts() {
   assertContains(backend, 'splitJsonl(jsonl)', 'LoopBackend splits AIPhone JSONL');
   assertContains(backend, 'this.callbacks.onA2uiJsonl?.(line)', 'LoopBackend emits AIPhone JSONL lines');
   assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
+  assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
+  assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
 
   assertContains(index, "export { LoopBackend }", 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
+  assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
   assertContains(index, 'configureLocalProviderConfigFromRawJson', 'public export includes provider raw JSON config');
   assertContains(index, 'prepareGmailOAuthAuthorizationUrl', 'public export includes Gmail OAuth helper');
