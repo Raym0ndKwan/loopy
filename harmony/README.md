@@ -31,8 +31,8 @@ The smoke builds the `agent_core` HAR and checks the AIPhone contract in this re
 
 - `LoopBackend` registers the AIPhone tool definitions and `dynamic.search`.
 - Tool output is emitted as AIPhone A2UI JSONL lines.
-- Unsafe send tools are blocked instead of auto-executed.
-- Providers not yet migrated return explicit error A2UI instead of mock data.
+- The migrated AIPhone runtime includes travel, train, flight, food, Gmail, YouTube, Calendar, Maps, social, and dynamic tool execution.
+- Unsafe send tools are blocked instead of auto-executed, and missing provider/OAuth config remains a truthful runtime error instead of mock data.
 
 ## LLM provider config
 

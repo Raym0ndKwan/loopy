@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -85,12 +85,18 @@ function verifySourceContracts() {
   const executor = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
   const backend = read('harmony/agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const index = read('harmony/agent_core/Index.ets');
+  const runtimeDefinitions = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
+  const runtimeGateway = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
 
   const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
+  const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const uniqueIds = new Set(ids);
+  const runtimeUniqueIds = new Set(runtimeIds);
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
+  assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
   assert(ids.length >= 19, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
   for (const id of [
     'travel.search',
@@ -109,19 +115,32 @@ function verifySourceContracts() {
     'maps.place.details'
   ]) {
     assert(uniqueIds.has(id), `registered ${id}`);
+    assert(runtimeUniqueIds.has(id), `runtime registered ${id}`);
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
   assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
+  assert(ids.every((id) => runtimeUniqueIds.has(id)), 'public and runtime tool registries align');
 
-  assertContains(executor, 'isRegisteredAiphoneToolId(toolId)', 'executor rejects unknown tools');
-  assertContains(executor, "toolId === 'gmail.message.send'", 'executor handles blocked Gmail send');
-  assertContains(executor, 'UnsafeActionBlocked', 'Gmail send returns unsafe action block');
-  assertContains(executor, '不会自动发送 Gmail', 'Gmail send does not auto-send');
-  assertContains(executor, "toolId === 'social.reply.send'", 'executor handles social reply send');
-  assertContains(executor, '不会假装发送成功', 'social send does not fake success');
-  assertContains(executor, '尚未迁移', 'unsupported providers are explicit');
-  assertContains(executor, '不会返回模拟数据', 'unsupported providers do not return mock data');
-  assertContains(executor, 'dynamic.search 已注册', 'dynamic search unsupported path is explicit');
+  const runtimeFiles = readdirSync(runtimeDir).filter((name) => name.endsWith('.ets'));
+  assert(runtimeFiles.length >= 30, 'AIPhone runtime files are vendored into Loopy', `found ${runtimeFiles.length}`);
+
+  assertContains(executor, 'isRegisteredToolId(toolId)', 'executor rejects unknown tools through runtime registry');
+  assertContains(executor, 'callToolGateway(', 'executor delegates to runtime tool gateway');
+  assertContains(executor, 'defaultToolGatewayUrl()', 'executor uses local AIPhone tool route');
+  assertContains(executor, 'result.raw.trim().length > 0', 'executor returns runtime A2UI JSONL');
+
+  assertContains(runtimeGateway, 'async function callLocalTravelSearch', 'runtime includes travel execution');
+  assertContains(runtimeGateway, 'async function callLocalTrainSearch', 'runtime includes train execution');
+  assertContains(runtimeGateway, 'async function callLocalFlightSearch', 'runtime includes flight execution');
+  assertContains(runtimeGateway, 'async function callLocalFoodSearch', 'runtime includes food execution');
+  assertContains(runtimeGateway, 'async function callLocalGmailTool', 'runtime includes Gmail execution');
+  assertContains(runtimeGateway, 'async function callLocalYouTubeTool', 'runtime includes YouTube execution');
+  assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');
+  assertContains(runtimeGateway, 'async function callLocalMapsTool', 'runtime includes Maps execution');
+  assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
+  assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
+  assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
+  assertContains(runtimeGateway, '不会假装发送成功', 'runtime does not fake social sends');
 
   assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
   assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
@@ -132,6 +151,9 @@ function verifySourceContracts() {
   assertContains(index, "export { LoopBackend }", 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
+  assertContains(index, 'configureLocalProviderConfigFromRawJson', 'public export includes provider raw JSON config');
+  assertContains(index, 'prepareGmailOAuthAuthorizationUrl', 'public export includes Gmail OAuth helper');
+  assertContains(index, 'AssetCredentialStore', 'public export includes dynamic credential store');
 }
 
 runHarBuild();
