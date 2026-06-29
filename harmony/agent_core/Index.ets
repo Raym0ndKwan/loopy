@@ -17,4 +17,5 @@ export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiMode
 export { LoopBackend } from './src/main/ets/aiphone/LoopBackend';
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
 export { aiphoneErrorJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
+export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel, allToolDefinitions, aiphoneToolDefinitionCount, isKnownDomainToolId, isRegisteredAiphoneToolId, toolDefinitionForToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
