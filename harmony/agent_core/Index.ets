@@ -15,4 +15,4 @@ export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';
 export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener } from './src/main/ets/a2ui/A2uiAgentRunner';
 export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiModelFactory';
 export { LoopBackend } from './src/main/ets/aiphone/LoopBackend';
-export { LoopBackendCallbacks, LoopBackendRequest, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
+export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
