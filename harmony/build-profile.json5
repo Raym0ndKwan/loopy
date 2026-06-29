@@ -1,0 +1,62 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001928E74BC2CC74938961DB8E52A224C54575C1F69BC3A8F845DA0C2490F175A5928409B86E97",
+          "profile": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.p12",
+          "storePassword": "00000019CF3FE46311512DD5F7E717646AC418E342B37DED8256FE37B0DFAC22C679BB139E2DCC3129"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.0(12)",
+        "runtimeOS": "HarmonyOS",
+        "targetSdkVersion": "6.1.1(24)"
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "agent_core",
+      "srcPath": "./agent_core",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

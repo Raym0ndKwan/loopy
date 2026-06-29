@@ -1,0 +1,10 @@
+export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
+export { AgentTool } from './src/main/ets/agent/AgentTool';
+export { ToolRegistry } from './src/main/ets/agent/ToolRegistry';
+export { ReActAgentRunner, AgentListener } from './src/main/ets/agent/ReActAgentRunner';
+export { LocalModel } from './src/main/ets/model/LocalModel';
+export { LlmProvider } from './src/main/ets/model/LlmProvider';
+export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
+export { OpenAiCompatibleModel } from './src/main/ets/model/OpenAiCompatibleModel';
+export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/ets/model/LoopModelFactory';

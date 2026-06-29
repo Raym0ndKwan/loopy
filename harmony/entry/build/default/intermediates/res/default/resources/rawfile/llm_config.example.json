@@ -1,0 +1,6 @@
+{
+  "providerName": "ali-bailian-openai",
+  "apiKey": "sk-136f3579c83b48a492097791ba15c036",
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "model": "qwen-plus"
+}

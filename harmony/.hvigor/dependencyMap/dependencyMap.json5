@@ -1,0 +1,1 @@
+{"basePath":"/Users/raymondkwan/Documents/android_agentic_loop/harmony/.hvigor/dependencyMap/dependencyMap.json5","rootDependency":"./oh-package.json5","dependencyMap":{"agent_core":"./agent_core/oh-package.json5","entry":"./entry/oh-package.json5"},"modules":[{"name":"agent_core","srcPath":"../../../agent_core"},{"name":"entry","srcPath":"../../../entry"}]}

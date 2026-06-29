@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "Loop ReAct agent entry module"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "Loop agent chat"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "Loop"
+    },
+    {
+      "name": "internet_permission_reason",
+      "value": "Loop calls your configured LLM endpoint over the network."
+    }
+  ]
+}
