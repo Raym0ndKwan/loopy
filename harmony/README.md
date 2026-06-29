@@ -34,6 +34,18 @@ The smoke builds the `agent_core` HAR and checks the AIPhone contract in this re
 - The migrated AIPhone runtime includes travel, train, flight, food, Gmail, YouTube, Calendar, Maps, social, and dynamic tool execution.
 - Unsafe send tools are blocked instead of auto-executed, and missing provider/OAuth config remains a truthful runtime error instead of mock data.
 
+To validate from AIPhoneDemo without touching the main working tree, create a temporary worktree and patch only that copy:
+
+```bash
+cd harmony
+DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
+  node scripts/aiphonedemo-worktree-smoke.mjs --reset-worktree
+```
+
+That command prepares `/Users/luoyige/DevEcoStudioProjects/AIPhoneDemo-loopy-verify`, swaps its model client to `@loop/agent-core`, syncs local provider config when `tool-gateway/.env.local` exists, and builds a signed HAP. Add `--device-smoke` to install the temporary HAP and run AIPhoneDemo's `scripts/aiphone-device-smoke.mjs --full-regression` against the device.
+
+When `--device-smoke` is used, the script reads the connected device API from `hdc shell param get const.ohos.apiversion`. API 22 devices get a temporary worktree-only product SDK patch to `6.0.2(22)` before build/install; API 23 devices use `6.1.0(23)`. Override this with `AIPHONE_VERIFY_PRODUCT_SDK='6.0.2(22)'` when you need to force a specific verification target.
+
 ## LLM provider config
 
 Harmony reads provider settings from a raw resource file:

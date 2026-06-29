@@ -147,7 +147,7 @@ export class LoopBackend {
     }
     registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -155,7 +155,35 @@ export class LoopBackend {
   }
 
   private describeAiphoneTool(definition: ToolDefinition): string {
-    return definition.intent + ' inputSchema=' + definition.inputSchema + ' outputSchema=' + definition.outputSchema;
+    let description = definition.intent + ' risk=' + definition.riskLevel + ' inputSchema=' + definition.inputSchema + ' outputSchema=' + definition.outputSchema;
+    if (definition.toolId === 'travel.search') {
+      description += '. Use for general train/flight travel options. Do not use for ferry or boat tickets; use dynamic.search for those unsupported transport domains.';
+    } else if (definition.toolId === 'train.search') {
+      description += '. Use for railway, high-speed rail, bullet train, station-to-station, 12306, or train schedule requests.';
+    } else if (definition.toolId === 'flight.search') {
+      description += '. Use for flight, airline, airport, or flight-board requests.';
+    } else if (definition.toolId === 'food.search') {
+      description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
+    } else if (definition.toolId === 'maps.place.search') {
+      description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
+    } else if (definition.toolId === 'gmail.mail.search') {
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Generate args.query from the user request; never fabricate Gmail messages.';
+    } else if (definition.toolId === 'gmail.thread.read') {
+      description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
+    } else if (definition.toolId === 'gmail.draft.create') {
+      description += '. Use for Gmail replies, writing email, composing email, saying something to a recipient, or creating a draft. For normal "send/write an email saying..." requests, create a draft first instead of using gmail.message.send. Include args.to, args.subject, and args.body when available.';
+    } else if (definition.toolId === 'gmail.draft.apply') {
+      description += '. Use only after a user has already reviewed and confirmed an existing Gmail draft.';
+    } else if (definition.toolId === 'gmail.open.web') {
+      description += '. Use only when the user explicitly asks to open Gmail in the browser/web app.';
+    } else if (definition.toolId === 'gmail.message.send') {
+      description += '. Blocked safety fallback. Do not use for ordinary writing, composing, replying, or "send an email saying..." requests; use gmail.draft.create. Use only if the user explicitly asks to bypass review or confirmation and send immediately, and expect the client to block it.';
+    } else if (definition.toolId === 'calendar.events.search') {
+      description += '. Use for reading Google Calendar events or schedules.';
+    } else if (definition.toolId === 'calendar.event.create') {
+      description += '. Use for drafting or creating Google Calendar events; confirm_required.';
+    }
+    return description;
   }
 
   private parseActionTrace(action: string): LoopToolTrace {

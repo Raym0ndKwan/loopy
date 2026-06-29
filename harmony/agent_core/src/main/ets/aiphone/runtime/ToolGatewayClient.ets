@@ -2819,12 +2819,31 @@ function issueRow(label: string, snapshot: ToolA2uiSnapshot, emptyText: string):
   };
 }
 
+async function safeTravelTool(sourceLabel: string, toolId: string, surfaceId: string, task: Promise<string>): Promise<string> {
+  try {
+    return await task;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    aiLogError('[AIPhone][LocalToolTravelSourceException] toolId=' + toolId +
+      ' source=' + sourceLabel +
+      ' message=' + message.substring(0, 320));
+    return errorA2ui(
+      surfaceId,
+      toolId,
+      sourceLabel + '调用异常',
+      message,
+      [message.substring(0, 700)],
+      ['重新查询', '只查其他来源']
+    );
+  }
+}
+
 async function callLocalTravelSearch(prompt: string, surfaceId: string): Promise<string> {
   const trainPrompt = /高铁|动车|\bG\d+|\bD\d+/i.test(prompt) ? prompt : prompt + ' 高铁';
   const flightPrompt = /航班|机票|飞机/.test(prompt) ? prompt : prompt + ' 航班';
   const results = await Promise.all([
-    callLocalTrainSearch(trainPrompt, surfaceId + '_train'),
-    callLocalFlightSearch(flightPrompt, surfaceId + '_flight')
+    safeTravelTool('高铁 · 12306', 'train.search', surfaceId + '_train', callLocalTrainSearch(trainPrompt, surfaceId + '_train')),
+    safeTravelTool('飞机 · 飞常准', 'flight.search', surfaceId + '_flight', callLocalFlightSearch(flightPrompt, surfaceId + '_flight'))
   ]);
   const trainSnapshot = snapshotFromToolA2ui(results[0]);
   const flightSnapshot = snapshotFromToolA2ui(results[1]);

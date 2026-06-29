@@ -22,4 +22,3 @@ export function aiLogError(message: string): void {
   hilog.error(DOMAIN, TAG, '%{public}s', safe);
   console.error(safe);
 }
-
