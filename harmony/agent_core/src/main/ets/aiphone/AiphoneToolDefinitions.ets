@@ -311,6 +311,10 @@ export function isKnownDomainToolId(toolId: string): boolean {
   return toolDefinitionForToolId(toolId) !== null;
 }
 
+export function isRegisteredAiphoneToolId(toolId: string): boolean {
+  return isKnownDomainToolId(toolId) || toolId === 'dynamic.search';
+}
+
 export function isGmailToolId(toolId: string): boolean {
   const definition = toolDefinitionForToolId(toolId);
   return definition !== null && definition.domain === 'gmail';
@@ -421,5 +425,5 @@ export function resolveBackendForTool(toolId: string, availability: BackendAvail
 }
 
 export function aiphoneToolDefinitionCount(): number {
-  return allToolDefinitions().length;
+  return TOOL_DEFINITIONS.length;
 }
