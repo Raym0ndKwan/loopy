@@ -66,10 +66,16 @@ export class ReActAgentRunner {
       listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
 
       let observation: string;
-      if (call.name === UI_TOOL_NAME) {
-        observation = await this.runUiTool(call.input, listener);
-      } else {
-        observation = await this.tools.run(call.name, call.input);
+      try {
+        if (call.name === UI_TOOL_NAME) {
+          observation = await this.runUiTool(call.input, listener);
+        } else {
+          observation = await this.tools.run(call.name, call.input);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `${error}`;
+        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        return;
       }
 
       scratchpad.push(response);

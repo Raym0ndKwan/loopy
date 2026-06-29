@@ -10,7 +10,7 @@ HarmonyOS NEXT port of the Loop ReAct agent starter. Matches the Android app:
 
 ## Open in DevEco Studio
 
-1. Install [DevEco Studio](https://developer.huawei.com/consumer/en/deveco-studio/) with HarmonyOS NEXT SDK **5.0.5 (API 17)+** (required by AGenUI).
+1. Install [DevEco Studio](https://developer.huawei.com/consumer/en/deveco-studio/) with HarmonyOS NEXT SDK **6.1.0 (API 23)** for the checked-in build profile. AGenUI itself requires HarmonyOS NEXT SDK **5.0.5 (API 17)+**.
 2. Open the `harmony/` folder as a project (not the repo root).
 3. Configure signing under **File → Project Structure → Signing Configs** for device or emulator runs.
 4. Sync/build, then run the `entry` module on a phone emulator or device.
