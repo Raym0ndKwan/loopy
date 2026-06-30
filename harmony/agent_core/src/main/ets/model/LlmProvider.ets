@@ -6,6 +6,7 @@ interface LlmConfigJson {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  customParametersJson?: string;
 }
 
 export class LlmProvider {
@@ -13,12 +14,14 @@ export class LlmProvider {
   readonly apiKey: string;
   readonly baseUrl: string;
   readonly model: string;
+  readonly customParametersJson: string;
 
-  constructor(name: string, apiKey: string, baseUrl: string, model: string) {
+  constructor(name: string, apiKey: string, baseUrl: string, model: string, customParametersJson: string = '') {
     this.name = name;
     this.apiKey = apiKey;
     this.baseUrl = LlmProvider.trimTrailingSlash(baseUrl);
     this.model = model;
+    this.customParametersJson = customParametersJson.trim();
   }
 
   isConfigured(): boolean {
@@ -28,7 +31,13 @@ export class LlmProvider {
   }
 
   chatCompletionsUrl(): string {
-    return `${this.baseUrl}/chat/completions`;
+    if (this.baseUrl.endsWith('/v1/chat/completions') || this.baseUrl.endsWith('/chat/completions')) {
+      return this.baseUrl;
+    }
+    if (this.baseUrl.endsWith('/v1')) {
+      return `${this.baseUrl}/chat/completions`;
+    }
+    return `${this.baseUrl}/v1/chat/completions`;
   }
 
   static async fromContext(context: common.UIAbilityContext): Promise<LlmProvider> {
@@ -42,7 +51,8 @@ export class LlmProvider {
         json.providerName ?? '',
         json.apiKey ?? '',
         json.baseUrl ?? '',
-        json.model ?? ''
+        json.model ?? '',
+        json.customParametersJson ?? ''
       );
     } catch (_error) {
       return new LlmProvider('', '', '', '');

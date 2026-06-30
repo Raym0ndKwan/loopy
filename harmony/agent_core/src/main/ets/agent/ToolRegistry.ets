@@ -10,7 +10,7 @@ class NoteTool implements AgentTool {
     return 'Echoes a note back into the loop.';
   }
 
-  run(input: string): string {
+  async run(input: string): Promise<string> {
     const trimmed = input.trim();
     return trimmed.length === 0 ? 'No note provided.' : `Noted: ${trimmed}`;
   }
@@ -25,7 +25,7 @@ class TimeTool implements AgentTool {
     return 'Returns the device\'s local date and time.';
   }
 
-  run(_input: string): string {
+  async run(_input: string): Promise<string> {
     return new Date().toLocaleString();
   }
 }
@@ -50,12 +50,12 @@ export class ToolRegistry {
     return description;
   }
 
-  run(name: string, input: string): string {
+  async run(name: string, input: string): Promise<string> {
     const tool = this.tools.get(name);
     if (tool === undefined) {
       return `Unknown tool: ${name}`;
     }
-    return tool.run(input ?? '');
+    return await tool.run(input ?? '');
   }
 }
 

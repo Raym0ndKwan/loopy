@@ -10,12 +10,41 @@ HarmonyOS NEXT port of the Loop ReAct agent starter. Matches the Android app:
 
 ## Open in DevEco Studio
 
-1. Install [DevEco Studio](https://developer.huawei.com/consumer/en/deveco-studio/) with HarmonyOS NEXT SDK **5.0.5 (API 17)+** (required by AGenUI).
+1. Install [DevEco Studio](https://developer.huawei.com/consumer/en/deveco-studio/) with HarmonyOS NEXT SDK **6.1.0 (API 23)** for the checked-in build profile. AGenUI itself requires HarmonyOS NEXT SDK **5.0.5 (API 17)+**.
 2. Open the `harmony/` folder as a project (not the repo root).
 3. Configure signing under **File → Project Structure → Signing Configs** for device or emulator runs.
 4. Sync/build, then run the `entry` module on a phone emulator or device.
 
 If `ohpm install` fails looking for `@ohos/hvigor`, that package ships with DevEco Studio and must **not** be listed in `oh-package.json5` `devDependencies`. Use **File → Sync and Refresh Project** instead.
+
+## AIPhone backend verification
+
+Run the Loopy-side smoke before wiring this HAR into AIPhoneDemo:
+
+```bash
+cd harmony
+DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
+  node scripts/verify-aiphone-backend.mjs
+```
+
+The smoke builds the `agent_core` HAR and checks the AIPhone contract in this repo:
+
+- `LoopBackend` registers the AIPhone tool definitions and `dynamic.search`.
+- Tool output is emitted as AIPhone A2UI JSONL lines.
+- The migrated AIPhone runtime includes travel, train, flight, food, Gmail, YouTube, Calendar, Maps, social, and dynamic tool execution.
+- Unsafe send tools are blocked instead of auto-executed, and missing provider/OAuth config remains a truthful runtime error instead of mock data.
+
+To validate from AIPhoneDemo without touching the main working tree, create a temporary worktree and patch only that copy:
+
+```bash
+cd harmony
+DEVECO_SDK_HOME=/Applications/DevEco-Studio.app/Contents/sdk \
+  node scripts/aiphonedemo-worktree-smoke.mjs --reset-worktree
+```
+
+That command prepares `/Users/luoyige/DevEcoStudioProjects/AIPhoneDemo-loopy-verify`, swaps its model client to `@loop/agent-core`, syncs local provider config when `tool-gateway/.env.local` exists, and builds a signed HAP. Add `--device-smoke` to install the temporary HAP and run AIPhoneDemo's `scripts/aiphone-device-smoke.mjs --full-regression` against the device.
+
+When `--device-smoke` is used, the script reads the connected device API from `hdc shell param get const.ohos.apiversion`. API 22 devices get a temporary worktree-only product SDK patch to `6.0.2(22)` before build/install; API 23 devices use `6.1.0(23)`. Override this with `AIPHONE_VERIFY_PRODUCT_SDK='6.0.2(22)'` when you need to force a specific verification target.
 
 ## LLM provider config
 

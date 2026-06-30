@@ -5,7 +5,7 @@ import {
   DeleteSurfaceEnvelope
 } from './A2uiTypes';
 
-export const A2UI_VERSION = 'v0.9';
+export const A2UI_VERSION = 'v0.9.1';
 
 /** AGenUI freestanding catalog — see AGenUI/agenui_catalog.json */
 export const AGENUI_CATALOG_ID = 'https://github.com/AGenUI/AGenUI/blob/main/agenui_catalog.json';

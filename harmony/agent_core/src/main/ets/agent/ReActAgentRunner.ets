@@ -7,6 +7,7 @@ export type AgentListener = (event: AgentEvent) => void;
 export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
+const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
 
 class ToolCall {
   name: string;
@@ -66,10 +67,20 @@ export class ReActAgentRunner {
       listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
 
       let observation: string;
-      if (call.name === UI_TOOL_NAME) {
-        observation = await this.runUiTool(call.input, listener);
-      } else {
-        observation = this.tools.run(call.name, call.input);
+      try {
+        if (call.name === UI_TOOL_NAME) {
+          if (this.uiHandler === null) {
+            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+            return;
+          }
+          observation = await this.runUiTool(call.input, listener);
+        } else {
+          observation = await this.tools.run(call.name, call.input);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `${error}`;
+        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        return;
       }
 
       scratchpad.push(response);
@@ -102,7 +113,13 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
+    if (this.uiHandler !== null) {
+      prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
+    } else {
+      prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output, return Final with a concise summary.\n';
+    }
+    prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
+    prompt += 'After a successful domain-tool observation, do not call a display-only tool; return Final.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
@@ -129,13 +146,53 @@ export class ReActAgentRunner {
   }
 
   private readLineValue(text: string, prefix: string): string | null {
-    const lines = text.split(/\r?\n/);
-    for (const line of lines) {
-      if (line.startsWith(prefix)) {
-        return line.substring(prefix.length).trim();
+    const start = this.findTagStart(text, prefix);
+    if (start < 0) {
+      return null;
+    }
+    const valueStart = start + prefix.length;
+    const tail = text.substring(valueStart);
+    const next = this.findNextTagStart(tail, prefix);
+    const value = next < 0 ? tail : tail.substring(0, next);
+    return value.trim();
+  }
+
+  private findTagStart(text: string, prefix: string): number {
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const index = text.indexOf(prefix, searchFrom);
+      if (index < 0) {
+        return -1;
+      }
+      if (this.isTagBoundary(text, index)) {
+        return index;
+      }
+      searchFrom = index + prefix.length;
+    }
+    return -1;
+  }
+
+  private findNextTagStart(text: string, currentPrefix: string): number {
+    let result = -1;
+    for (let index = 0; index < REACT_TAGS.length; index++) {
+      const prefix = REACT_TAGS[index];
+      if (prefix === currentPrefix) {
+        continue;
+      }
+      const start = this.findTagStart(text, prefix);
+      if (start >= 0 && (result < 0 || start < result)) {
+        result = start;
       }
     }
-    return null;
+    return result;
+  }
+
+  private isTagBoundary(text: string, index: number): boolean {
+    if (index === 0) {
+      return true;
+    }
+    const previous = text.charAt(index - 1);
+    return previous === '\n' || previous === '\r' || previous === ' ' || previous === '\t';
   }
 
   private parseAction(response: string): ToolCall | null {
@@ -144,8 +201,22 @@ export class ReActAgentRunner {
       return null;
     }
 
-    const open = action.indexOf('[');
-    const close = action.lastIndexOf(']');
+    const bracketCall = this.parseDelimitedAction(action, '[', ']');
+    if (bracketCall !== null) {
+      return bracketCall;
+    }
+
+    const parenCall = this.parseDelimitedAction(action, '(', ')');
+    if (parenCall !== null) {
+      return parenCall;
+    }
+
+    return null;
+  }
+
+  private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {
+    const open = action.indexOf(openToken);
+    const close = action.lastIndexOf(closeToken);
     if (open <= 0 || close < open) {
       return null;
     }

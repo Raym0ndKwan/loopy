@@ -3,5 +3,5 @@ export interface AgentTool {
 
   description(): string;
 
-  run(input: string): string;
+  run(input: string): Promise<string>;
 }

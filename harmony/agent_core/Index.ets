@@ -14,3 +14,12 @@ export { A2uiComponentDef, CreateSurfaceBody, UpdateComponentsBody } from './src
 export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';
 export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener } from './src/main/ets/a2ui/A2uiAgentRunner';
 export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiModelFactory';
+export { LoopBackend } from './src/main/ets/aiphone/LoopBackend';
+export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
+export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
+export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
+export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel, allToolDefinitions, aiphoneToolDefinitionCount, isKnownDomainToolId, isRegisteredAiphoneToolId, toolDefinitionForToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
+export { callToolGateway, configureLocalProviderConfig, configureLocalProviderConfigFromRawJson, configureLocalToolDebugConfig, defaultToolGatewayUrl, gmailOAuthConfigFromProvider, isRegisteredToolId, localProviderConfigDebugSummary, prepareGmailOAuthAuthorizationUrl, prepareGoogleOAuthAuthorizationUrl, LocalProviderConfig, LocalToolDebugConfig } from './src/main/ets/aiphone/runtime/ToolGatewayClient';
+export { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from './src/main/ets/aiphone/runtime/GmailToolA2ui';
+export { AssetCredentialStore, CredentialStore, credentialRefFor } from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
+export { GmailOAuthConfig, GmailOAuthRedirectResult, GmailOAuthTokenSet, handleGmailOAuthRedirect } from './src/main/ets/aiphone/runtime/GmailOAuthClient';
