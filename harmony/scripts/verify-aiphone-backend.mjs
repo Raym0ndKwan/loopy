@@ -108,17 +108,21 @@ function verifySourceContracts() {
   const runtimeUniqueIds = new Set(runtimeIds);
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
   assert(runtimeIds.length === runtimeUniqueIds.size, 'runtime tool ids are unique');
-  assert(ids.length >= 19, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
+  assert(ids.length >= 22, 'AIPhone tool registry has expected breadth', `found ${ids.length}`);
   for (const id of [
     'travel.search',
     'train.search',
     'flight.search',
     'food.search',
     'social.reply.send',
+    'mail.search',
+    'mail.thread.read',
+    'mail.draft.create',
     'gmail.mail.search',
     'gmail.thread.read',
     'gmail.draft.create',
     'gmail.message.send',
+    'media.video.search',
     'youtube.video.search',
     'calendar.events.search',
     'calendar.event.create',
@@ -144,7 +148,9 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalTrainSearch', 'runtime includes train execution');
   assertContains(runtimeGateway, 'async function callLocalFlightSearch', 'runtime includes flight execution');
   assertContains(runtimeGateway, 'async function callLocalFoodSearch', 'runtime includes food execution');
+  assertContains(runtimeGateway, 'async function callLocalMailTool', 'runtime includes aggregate mail execution');
   assertContains(runtimeGateway, 'async function callLocalGmailTool', 'runtime includes Gmail execution');
+  assertContains(runtimeGateway, 'async function callLocalMediaTool', 'runtime includes media video execution');
   assertContains(runtimeGateway, 'async function callLocalYouTubeTool', 'runtime includes YouTube execution');
   assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');
   assertContains(runtimeGateway, 'async function callLocalMapsTool', 'runtime includes Maps execution');
