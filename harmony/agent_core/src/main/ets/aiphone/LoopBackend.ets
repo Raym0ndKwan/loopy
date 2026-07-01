@@ -34,17 +34,34 @@ class AiphoneTool implements AgentTool {
   }
 
   async run(input: string): Promise<string> {
+    const parsedArgs = this.parseInputArgs(input);
     const jsonl = await runAiphoneTool(
       this.toolId,
-      input,
+      this.request.prompt.trim().length > 0 ? this.request.prompt : input,
       this.request.surfaceId,
       this.request.actionId,
-      this.request.args ?? null
+      this.request.args ?? parsedArgs
     );
     for (const line of splitJsonl(jsonl)) {
       this.callbacks.onA2uiJsonl?.(line);
     }
     return jsonl;
+  }
+
+  private parseInputArgs(input: string): Object | null {
+    const trimmed = input.trim();
+    if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Object | null;
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_error) {
+      return null;
+    }
+    return null;
   }
 }
 
@@ -166,6 +183,12 @@ export class LoopBackend {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
+    } else if (definition.toolId === 'mail.search') {
+      description += '. Use for generic mailbox/email/inbox requests and aggregate Gmail plus QQ Mail search. If the user says only mail, email, inbox, or latest important mail, choose mail.search with providers ["gmail","qq"]. Never fabricate mail rows.';
+    } else if (definition.toolId === 'mail.thread.read') {
+      description += '. Use only when the user opens or reads a specific aggregate mail result and provider plus messageId/threadId are available.';
+    } else if (definition.toolId === 'mail.draft.create') {
+      description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
       description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Generate args.query from the user request; never fabricate Gmail messages.';
     } else if (definition.toolId === 'gmail.thread.read') {
@@ -178,6 +201,10 @@ export class LoopBackend {
       description += '. Use only when the user explicitly asks to open Gmail in the browser/web app.';
     } else if (definition.toolId === 'gmail.message.send') {
       description += '. Blocked safety fallback. Do not use for ordinary writing, composing, replying, or "send an email saying..." requests; use gmail.draft.create. Use only if the user explicitly asks to bypass review or confirmation and send immediately, and expect the client to block it.';
+    } else if (definition.toolId === 'media.video.search') {
+      description += '. Use for Bilibili/B站/哔哩哔哩 video search or multi-source video search. If the same request mentions YouTube and Bilibili, choose media.video.search with sources ["youtube","bilibili"].';
+    } else if (definition.toolId === 'youtube.video.search') {
+      description += '. Use only for explicit YouTube-only public video search; use media.video.search for Bilibili or multi-source video requests.';
     } else if (definition.toolId === 'calendar.events.search') {
       description += '. Use for reading Google Calendar events or schedules.';
     } else if (definition.toolId === 'calendar.event.create') {

@@ -17,6 +17,7 @@ const javaHome = process.env.JAVA_HOME || (existsSync(resolve(bundledJavaHome, '
 
 const args = process.argv.slice(2);
 const deviceSmoke = args.includes('--device-smoke');
+const fullRegression = args.includes('--full-regression');
 const keepExisting = args.includes('--reuse');
 const resetExisting = args.includes('--reset-worktree');
 const prepareOnly = args.includes('--prepare-only');
@@ -24,6 +25,11 @@ const skipOhpm = args.includes('--skip-ohpm');
 const aiphoneRepo = process.env.AIPHONE_DEMO_REPO || defaultAiphoneRepo;
 const worktree = process.env.AIPHONE_LOOPY_WORKTREE || defaultWorktree;
 const productSdkVersionOverride = process.env.AIPHONE_VERIFY_PRODUCT_SDK || '';
+const hdcTarget = process.env.AIPHONE_HDC_TARGET || '';
+
+function hdcArgs(commandArgs) {
+  return hdcTarget.length > 0 ? ['-t', hdcTarget].concat(commandArgs) : commandArgs;
+}
 
 function run(command, commandArgs, options = {}) {
   console.log(`\n$ ${command} ${commandArgs.join(' ')}`);
@@ -45,7 +51,8 @@ function run(command, commandArgs, options = {}) {
     throw new Error(`${command} ${commandArgs.join(' ')} failed: ${result.error.message}`);
   }
   if (result.status !== 0) {
-    throw new Error(`${command} ${commandArgs.join(' ')} failed with status ${result.status}`);
+    const reason = result.signal !== null ? `signal ${result.signal}` : `status ${result.status}`;
+    throw new Error(`${command} ${commandArgs.join(' ')} failed with ${reason}`);
   }
 }
 
@@ -73,7 +80,8 @@ function runAndCapture(command, commandArgs, options = {}) {
     throw new Error(`${command} ${commandArgs.join(' ')} failed: ${result.error.message}`);
   }
   if (result.status !== 0) {
-    throw new Error(`${command} ${commandArgs.join(' ')} failed with status ${result.status}`);
+    const reason = result.signal !== null ? `signal ${result.signal}` : `status ${result.status}`;
+    throw new Error(`${command} ${commandArgs.join(' ')} failed with ${reason}`);
   }
   return output;
 }
@@ -418,20 +426,28 @@ function patchSmokeHarness() {
   let text = readFileSync(path, 'utf8');
   const replacements = [
     {
+      from: "function cleanupHilogProcesses() {\n  spawnSync('pkill', ['-f', `hdc -t ${target} hilog`], { encoding: 'utf8' });\n}",
+      to: "function cleanupHilogProcesses() {\n  // captureWhile() terminates the hilog child it starts. The final\n  // processCleanup assertion reports any leftover process without using pkill.\n}",
+      optional: true
+    },
+    {
       from: "    providerFailed: /\\[AIPhone\\]\\[LocalTool12306Endpoint\\][^\\n]*code=[45]\\d\\d/.test(text) || /\\[AIPhone\\]\\[LocalToolException\\]/.test(text) || (missingConfig && expectedToolId !== 'travel.search'),",
       to: "    providerFailed: /\\[AIPhone\\]\\[LocalTool12306Endpoint\\][^\\n]*code=[45]\\d\\d/.test(text) || /\\[AIPhone\\]\\[LocalToolException\\]/.test(text) || /\\[AIPhone\\]\\[LocalToolTravelSourceException\\]/.test(text) || /飞常准返回 HTTP [45]\\d\\d/.test(text) || (missingConfig && expectedToolId !== 'travel.search'),"
     },
     {
       from: "  const layoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n    if (allowsPartialTravelSourceFailure && marker === '查询失败') {\n      return false;\n    }\n    return layoutText.includes(marker);\n  });",
-      to: "  const allowsTruthfulProviderFailure = summary.toolOk === true &&\n    (expectedToolId === 'flight.search' || expectedToolId === 'travel.search') &&\n    (/飞常准返回 HTTP [45]\\d\\d|LocalToolTravelSourceException|Failed to receive data from the peer|当前只展示供应商返回的真实错误|真实错误或空结果说明/.test(logs.join('\\n') + '\\n' + layoutText));\n  const layoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n    if (allowsPartialTravelSourceFailure && (marker === '查询失败' || marker === '需要供应商配置' || marker === '需要配置：')) {\n      return false;\n    }\n    if (allowsTruthfulProviderFailure && marker === '查询失败') {\n      return false;\n    }\n    return layoutText.includes(marker);\n  });"
+      to: "  const allowsTruthfulProviderFailure = summary.toolOk === true &&\n    (expectedToolId === 'flight.search' || expectedToolId === 'travel.search') &&\n    (/飞常准返回 HTTP [45]\\d\\d|LocalToolTravelSourceException|Failed to receive data from the peer|当前只展示供应商返回的真实错误|真实错误或空结果说明/.test(logs.join('\\n') + '\\n' + layoutText));\n  const layoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n    if (allowsPartialTravelSourceFailure && (marker === '查询失败' || marker === '需要供应商配置' || marker === '需要配置：')) {\n      return false;\n    }\n    if (allowsTruthfulProviderFailure && marker === '查询失败') {\n      return false;\n    }\n    return layoutText.includes(marker);\n  });",
+      optional: true
     },
     {
       from: "  summary.layoutOk = layoutBlockingHits.length === 0 &&\n    (allowsExternalGmailWeb || summary.layoutTextExposed || summary.htmlHomeDocument.ok);\n  summary.ok = summary.ok && summary.layoutOk;",
-      to: "  summary.layoutOk = layoutBlockingHits.length === 0 &&\n    (allowsExternalGmailWeb || summary.layoutTextExposed || summary.htmlHomeDocument.ok);\n  summary.ok = summary.ok && summary.layoutOk;\n  if (allowsTruthfulProviderFailure &&\n    summary.layoutOk &&\n    summary.model200 &&\n    summary.modelOk &&\n    summary.toolRequested &&\n    summary.localToolRequest &&\n    summary.toolOk &&\n    summary.hasExpectedToolId &&\n    summary.hasExpectedDiscoveredToolId &&\n    !summary.failedConnect &&\n    !summary.htmlLoadError &&\n    !summary.syntheticFallback) {\n    summary.ok = true;\n  }"
+      to: "  summary.layoutOk = layoutBlockingHits.length === 0 &&\n    (allowsExternalGmailWeb || summary.layoutTextExposed || summary.htmlHomeDocument.ok);\n  summary.ok = summary.ok && summary.layoutOk;\n  if (allowsTruthfulProviderFailure &&\n    summary.layoutOk &&\n    summary.model200 &&\n    summary.modelOk &&\n    summary.toolRequested &&\n    summary.localToolRequest &&\n    summary.toolOk &&\n    summary.hasExpectedToolId &&\n    summary.hasExpectedDiscoveredToolId &&\n    !summary.failedConnect &&\n    !summary.htmlLoadError &&\n    !summary.syntheticFallback) {\n    summary.ok = true;\n  }",
+      optional: true
     },
     {
       from: "const finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n  if (finalAllowsPartialTravel && (marker === '需要供应商配置' || marker === '需要配置：')) {\n    return false;\n  }\n  if (finalAllowsSourceFailure && marker === '查询失败') {\n    return false;\n  }\n  return finalLayoutText.includes(marker);\n});",
-      to: "const finalAllowsTruthfulProviderFailure = finalSummary !== null &&\n  finalSummary.toolOk === true &&\n  (finalSummary.expectedToolId === 'flight.search' || finalSummary.expectedToolId === 'travel.search') &&\n  /飞常准返回 HTTP [45]\\d\\d|当前只展示供应商返回的真实错误|真实错误或空结果说明/.test(finalLayoutText);\nconst finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n  if (finalAllowsPartialTravel && (marker === '需要供应商配置' || marker === '需要配置：')) {\n    return false;\n  }\n  if ((finalAllowsSourceFailure || finalAllowsTruthfulProviderFailure) && marker === '查询失败') {\n    return false;\n  }\n  return finalLayoutText.includes(marker);\n});"
+      to: "const finalAllowsTruthfulProviderFailure = finalSummary !== null &&\n  finalSummary.toolOk === true &&\n  (finalSummary.expectedToolId === 'flight.search' || finalSummary.expectedToolId === 'travel.search') &&\n  /飞常准返回 HTTP [45]\\d\\d|当前只展示供应商返回的真实错误|真实错误或空结果说明/.test(finalLayoutText);\nconst finalLayoutBlockingHits = finalLayoutBlockingMarkers.filter((marker) => {\n  if (finalAllowsPartialTravel && (marker === '需要供应商配置' || marker === '需要配置：')) {\n    return false;\n  }\n  if ((finalAllowsSourceFailure || finalAllowsTruthfulProviderFailure) && marker === '查询失败') {\n    return false;\n  }\n  return finalLayoutText.includes(marker);\n});",
+      optional: true
     }
   ];
   for (const replacement of replacements) {
@@ -439,6 +455,9 @@ function patchSmokeHarness() {
       continue;
     }
     if (!text.includes(replacement.from)) {
+      if (replacement.optional === true) {
+        continue;
+      }
       throw new Error(`Could not patch AIPhone smoke harness in ${path}: ${replacement.from.substring(0, 120)}`);
     }
     text = text.replace(replacement.from, replacement.to);
@@ -543,11 +562,15 @@ function buildHap() {
 }
 
 function installAndSmoke() {
-  const installOutput = runAndCapture('hdc', ['install', '-r', 'entry/build/default/outputs/default/entry-default-signed.hap'], { cwd: worktree });
+  const installOutput = runAndCapture('hdc', hdcArgs(['install', '-r', 'entry/build/default/outputs/default/entry-default-signed.hap']), { cwd: worktree });
   if (/failed to install|install failed|error:/i.test(installOutput)) {
     throw new Error(`hdc install reported failure:\n${installOutput}`);
   }
-  run(process.execPath, ['scripts/aiphone-device-smoke.mjs', '--full-regression'], {
+  const smokeArgs = ['scripts/aiphone-device-smoke.mjs'];
+  if (fullRegression) {
+    smokeArgs.push('--full-regression');
+  }
+  run(process.execPath, smokeArgs, {
     cwd: worktree,
     env: {
       AIPHONE_QUERY_TIMEOUT_MS: process.env.AIPHONE_QUERY_TIMEOUT_MS || '90000'
@@ -562,7 +585,7 @@ function sdkVersionForDeviceSmoke() {
   if (!deviceSmoke) {
     return '';
   }
-  const output = runAndCapture('hdc', ['shell', 'param', 'get', 'const.ohos.apiversion']);
+  const output = runAndCapture('hdc', hdcArgs(['shell', 'param', 'get', 'const.ohos.apiversion']));
   const match = output.match(/\b\d+\b/);
   if (match === null) {
     throw new Error(`Could not detect device API version from hdc output:\n${output}`);

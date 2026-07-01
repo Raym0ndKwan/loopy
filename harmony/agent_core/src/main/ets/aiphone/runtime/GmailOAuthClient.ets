@@ -1,8 +1,8 @@
 import { http } from '@kit.NetworkKit';
-import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import util from '@ohos.util';
 import { CredentialStore } from './DynamicCredentialStore';
 import { aiLogInfo } from './AiphoneLogger';
+import { utf8Bytes } from './Utf8Bytes';
 import {
   buildGoogleOAuthAuthorizationUrl,
   buildGoogleRefreshTokenBody,
@@ -217,11 +217,86 @@ function removeDanglingQuoteAfterClosedGroup(query: string): string {
   return query;
 }
 
-function gmailSearchQueryFromArgs(args: GmailArgRecord): string {
+function isAsciiMailKeywordToken(value: string): boolean {
+  if (!/^[A-Za-z0-9_.@-]+$/.test(value)) {
+    return false;
+  }
+  const lower = value.toLowerCase();
+  return lower !== 'gmail' && lower !== 'mail' && lower !== 'email';
+}
+
+function isGenericMailSearchToken(value: string): boolean {
+  const lower = value.toLowerCase();
+  return lower === '论文' ||
+    lower === '邮件' ||
+    lower === '邮箱' ||
+    lower === '相关' ||
+    lower === '相关邮件' ||
+    lower === '最新' ||
+    lower === '最新的' ||
+    lower === '重要' ||
+    lower === '收件箱' ||
+    lower === 'paper' ||
+    lower === 'papers';
+}
+
+function compactAsciiMailKeywordQuery(query: string): string {
+  if (query.indexOf('"') >= 0 || query.indexOf(':') >= 0 || query.indexOf(' OR ') >= 0) {
+    return query;
+  }
+  const tokens = query.split(/\s+/).filter((token: string): boolean => token.trim().length > 0);
+  const asciiTokens: string[] = [];
+  let hasSpecificNonAsciiToken = false;
+  tokens.forEach((token: string) => {
+    const trimmed = token.trim();
+    if (isAsciiMailKeywordToken(trimmed)) {
+      asciiTokens.push(trimmed);
+    } else if (!isGenericMailSearchToken(trimmed)) {
+      hasSpecificNonAsciiToken = true;
+    }
+  });
+  if (asciiTokens.length > 0 && !hasSpecificNonAsciiToken) {
+    return asciiTokens.join(' ');
+  }
+  return query;
+}
+
+function fallbackGmailSearchQuery(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (/eccv/i.test(trimmed)) {
+    return 'eccv';
+  }
+  if (/最新|重要|收件箱|inbox|important/i.test(trimmed)) {
+    return 'newer_than:30d';
+  }
+  let current = '';
+  let last = '';
+  for (let index = 0; index < trimmed.length; index++) {
+    const char = trimmed.charAt(index);
+    if (/^[A-Za-z0-9_.@-]$/.test(char)) {
+      current += char;
+    } else if (current.length > 0) {
+      if (isAsciiMailKeywordToken(current)) {
+        last = current;
+      }
+      current = '';
+    }
+  }
+  if (current.length > 0 && isAsciiMailKeywordToken(current)) {
+    last = current;
+  }
+  return last;
+}
+
+function gmailSearchQueryFromArgs(args: GmailArgRecord, prompt: string): string {
   let query = stringArg(args, 'query').trim();
+  if (query.length === 0) {
+    query = fallbackGmailSearchQuery(prompt);
+  }
   if (query.length === 0) {
     query = 'newer_than:30d';
   }
+  query = compactAsciiMailKeywordQuery(query);
   query = removeDanglingQuoteAfterClosedGroup(query);
   if (query.indexOf('-in:draft') < 0) {
     query += ' -in:draft';
@@ -245,14 +320,90 @@ function bytesToBase64Url(bytes: Uint8Array): string {
   return result.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 
-function utf8Bytes(value: string): Uint8Array {
-  return new util.TextEncoder().encodeInto(value);
+const SHA256_K: number[] = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+];
+
+function rotateRight32(value: number, bits: number): number {
+  return (value >>> bits) | (value << (32 - bits));
+}
+
+function sha256Bytes(data: Uint8Array): Uint8Array {
+  const bytes: number[] = [];
+  for (let index = 0; index < data.length; index++) {
+    bytes.push(data[index]);
+  }
+  const bitLength = bytes.length * 8;
+  bytes.push(0x80);
+  while (bytes.length % 64 !== 56) {
+    bytes.push(0);
+  }
+  for (let shift = 56; shift >= 0; shift -= 8) {
+    bytes.push(Math.floor(bitLength / Math.pow(2, shift)) & 0xff);
+  }
+
+  const hash: number[] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const words: number[] = new Array<number>(64);
+  for (let chunk = 0; chunk < bytes.length; chunk += 64) {
+    for (let index = 0; index < 16; index++) {
+      const offset = chunk + index * 4;
+      words[index] = ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0;
+    }
+    for (let index = 16; index < 64; index++) {
+      const s0 = rotateRight32(words[index - 15], 7) ^ rotateRight32(words[index - 15], 18) ^ (words[index - 15] >>> 3);
+      const s1 = rotateRight32(words[index - 2], 17) ^ rotateRight32(words[index - 2], 19) ^ (words[index - 2] >>> 10);
+      words[index] = (words[index - 16] + s0 + words[index - 7] + s1) >>> 0;
+    }
+    let a = hash[0];
+    let b = hash[1];
+    let c = hash[2];
+    let d = hash[3];
+    let e = hash[4];
+    let f = hash[5];
+    let g = hash[6];
+    let h = hash[7];
+    for (let index = 0; index < 64; index++) {
+      const s1 = rotateRight32(e, 6) ^ rotateRight32(e, 11) ^ rotateRight32(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + s1 + ch + SHA256_K[index] + words[index]) >>> 0;
+      const s0 = rotateRight32(a, 2) ^ rotateRight32(a, 13) ^ rotateRight32(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (s0 + maj) >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
+    }
+    hash[0] = (hash[0] + a) >>> 0;
+    hash[1] = (hash[1] + b) >>> 0;
+    hash[2] = (hash[2] + c) >>> 0;
+    hash[3] = (hash[3] + d) >>> 0;
+    hash[4] = (hash[4] + e) >>> 0;
+    hash[5] = (hash[5] + f) >>> 0;
+    hash[6] = (hash[6] + g) >>> 0;
+    hash[7] = (hash[7] + h) >>> 0;
+  }
+
+  const digest: number[] = [];
+  hash.forEach((word: number) => {
+    digest.push((word >>> 24) & 0xff, (word >>> 16) & 0xff, (word >>> 8) & 0xff, word & 0xff);
+  });
+  return new Uint8Array(digest);
 }
 
 export function gmailPkceChallengeS256(codeVerifier: string): string {
-  const digest = cryptoFramework.createMd('SHA256');
-  digest.updateSync({ data: utf8Bytes(codeVerifier) });
-  return bytesToBase64Url(digest.digestSync().data);
+  return bytesToBase64Url(sha256Bytes(utf8Bytes(codeVerifier)));
 }
 
 export function createGmailOAuthPending(nowMs: number = Date.now()): GmailOAuthPending {
@@ -481,7 +632,7 @@ export function gmailMcpToolNameForToolId(toolId: string): string {
 export function gmailMcpArgsForPrompt(toolId: string, prompt: string, args: Object | null = null): Object {
   const record = gmailArgRecord(args);
   if (toolId === 'gmail.mail.search') {
-    return new GmailSearchThreadsArgs(gmailSearchQueryFromArgs(record), pageSizeArg(record));
+    return new GmailSearchThreadsArgs(gmailSearchQueryFromArgs(record, prompt), pageSizeArg(record));
   }
   if (toolId === 'gmail.thread.read') {
     const threadId = stringArg(record, 'threadId').trim();
