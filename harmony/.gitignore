@@ -15,6 +15,7 @@ entry/oh_modules/
 
 # Local secrets — use llm_config.example.json
 **/rawfile/llm_config.json
+**/rawfile/composio_config.json
 
 # AGenUI HAR (fetch via scripts/fetch-agenui.sh)
 libs/*.har

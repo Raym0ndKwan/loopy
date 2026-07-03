@@ -1,5 +1,11 @@
 import { AgentTool } from './AgentTool';
 import { UiTool } from './UiTool';
+import { common } from '@kit.AbilityKit';
+import { ComposioConfig } from '../composio/ComposioConfig';
+import { ComposioSessionClient } from '../composio/ComposioSessionClient';
+import { ComposioTool } from '../composio/ComposioTool';
+
+export type ToolRegistryCloseHandler = () => Promise<void>;
 
 class NoteTool implements AgentTool {
   name(): string {
@@ -32,6 +38,7 @@ class TimeTool implements AgentTool {
 
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
+  private closeHandlers: ToolRegistryCloseHandler[] = [];
 
   constructor() {
     this.register(new NoteTool());
@@ -40,6 +47,10 @@ export class ToolRegistry {
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name(), tool);
+  }
+
+  registerCloseHandler(handler: ToolRegistryCloseHandler): void {
+    this.closeHandlers.push(handler);
   }
 
   describeTools(): string {
@@ -57,6 +68,24 @@ export class ToolRegistry {
     }
     return await tool.run(input ?? '');
   }
+
+  async close(): Promise<void> {
+    for (let index = 0; index < this.closeHandlers.length; index++) {
+      try {
+        await this.closeHandlers[index]();
+      } catch (_error) {
+      }
+    }
+  }
+}
+
+export async function createConfiguredLoopToolRegistry(context: common.UIAbilityContext): Promise<ToolRegistry> {
+  const registry = createLoopToolRegistry();
+  const client = new ComposioSessionClient(await ComposioConfig.fromContext(context));
+  await client.initialize();
+  registry.register(new ComposioTool(client));
+  registry.registerCloseHandler(async (): Promise<void> => client.close());
+  return registry;
 }
 
 export function createLoopToolRegistry(): ToolRegistry {

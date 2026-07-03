@@ -81,6 +81,15 @@ Edit `llm_config.json` and set `apiKey`.
 
 If the provider is not configured, the app uses `ScriptedLocalModel` (same fallback as Android).
 
+## Composio
+
+The regular Loop chat registers a `composio` meta tool, discovers ACTIVE connected accounts at
+startup, then lazily creates a tool-router session. Copy
+`entry/src/main/resources/rawfile/composio_config.example.json` to `composio_config.json` and set
+the scoped project `apiKey` plus the stable connected-account `userId`. The local config is ignored
+by Git. Discovered tools execute immediately, including tools with side effects; production apps
+should proxy Composio through their own backend.
+
 ## Source layout
 
 ```text

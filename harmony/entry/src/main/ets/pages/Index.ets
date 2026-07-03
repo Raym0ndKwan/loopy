@@ -6,11 +6,12 @@ import {
   A2uiAgentRunner,
   ConversationContext,
   createA2uiModelInfo,
+  createConfiguredLoopToolRegistry,
   createLoopModelInfo,
-  createLoopToolRegistry,
   parseJsonl,
   ReActAgentRunner,
   ScriptedA2uiModel,
+  ToolRegistry,
   UiRenderHandler
 } from '@loop/agent-core';
 import { A2uiFallbackView } from '../agenui/A2uiFallbackView';
@@ -32,15 +33,23 @@ struct Index {
   private scroller: Scroller = new Scroller();
   private conversation: ConversationContext = new ConversationContext();
   private lastUiTask: string = '';
+  private toolRegistryPromise: Promise<ToolRegistry> | null = null;
 
   private getAbilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
   }
 
   aboutToAppear(): void {
+    this.toolRegistryPromise = createConfiguredLoopToolRegistry(this.getAbilityContext());
     createLoopModelInfo(this.getAbilityContext()).then((info) => {
       this.updateModelStatus(info.mode, info.modelName);
     });
+  }
+
+  aboutToDisappear(): void {
+    const tools = this.toolRegistryPromise;
+    this.toolRegistryPromise = null;
+    tools?.then(async (registry: ToolRegistry): Promise<void> => registry.close()).catch((_error: Error): void => {});
   }
 
   build() {
@@ -155,9 +164,13 @@ struct Index {
       this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
 
       const uiHandler = await this.buildUiHandler();
+      if (this.toolRegistryPromise === null) {
+        this.toolRegistryPromise = createConfiguredLoopToolRegistry(this.getAbilityContext());
+      }
+      const tools = await this.toolRegistryPromise;
       const runner = new ReActAgentRunner(
         modelInfo.model,
-        createLoopToolRegistry(),
+        tools,
         MAX_STEPS,
         uiHandler
       );
