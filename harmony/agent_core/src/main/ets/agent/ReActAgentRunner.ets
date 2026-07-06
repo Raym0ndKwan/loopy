@@ -86,6 +86,10 @@ export class ReActAgentRunner {
       scratchpad.push(response);
       scratchpad.push(`Observation: ${observation}`);
       listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
+      if (this.isA2uiObservation(observation)) {
+        listener(new AgentEvent(AgentEventKind.FINAL, '结果已更新到主页。'));
+        return;
+      }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
@@ -113,15 +117,14 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
+    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
       prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output, return Final with a concise summary.\n';
     }
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
-    prompt += 'Call composio only when the user request needs one of the authorized toolkits listed in its description. Do not call it for unrelated requests.\n';
-    prompt += 'Composio requires two phases: after operation=search returns schemas, call composio again with operation=execute. Do not return Final until execute returns business data or an error.\n';
-    prompt += 'After a successful data-returning domain-tool observation, do not call a display-only tool; return Final.\n';
+    prompt += 'After a successful domain-tool observation, do not call a display-only tool; return Final.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
     if (conversation !== undefined && !conversation.isEmpty()) {
@@ -145,6 +148,11 @@ export class ReActAgentRunner {
     if (thought !== null) {
       listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
     }
+  }
+
+  private isA2uiObservation(observation: string): boolean {
+    return observation.indexOf('"version":"v0.9.1"') >= 0 &&
+      (observation.indexOf('"createSurface"') >= 0 || observation.indexOf('"updateComponents"') >= 0);
   }
 
   private readLineValue(text: string, prefix: string): string | null {
@@ -203,14 +211,14 @@ export class ReActAgentRunner {
       return null;
     }
 
-    const bracketCall = this.parseDelimitedAction(action, '[', ']');
-    if (bracketCall !== null) {
-      return bracketCall;
-    }
-
     const parenCall = this.parseDelimitedAction(action, '(', ')');
     if (parenCall !== null) {
       return parenCall;
+    }
+
+    const bracketCall = this.parseDelimitedAction(action, '[', ']');
+    if (bracketCall !== null) {
+      return bracketCall;
     }
 
     return null;

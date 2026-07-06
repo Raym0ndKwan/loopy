@@ -34,13 +34,18 @@ class AiphoneTool implements AgentTool {
   }
 
   async run(input: string): Promise<string> {
+    if (this.toolId === 'memory.update') {
+      return this.runMemoryUpdate(input);
+    }
     const parsedArgs = this.parseInputArgs(input);
+    const userPrompt = this.request.userPrompt === undefined ? '' : this.request.userPrompt;
+    const promptForTool = userPrompt.trim().length > 0 ? userPrompt : (input.trim().length > 0 ? input : this.request.prompt);
     const jsonl = await runAiphoneTool(
       this.toolId,
-      this.request.prompt.trim().length > 0 ? this.request.prompt : input,
+      promptForTool,
       this.request.surfaceId,
       this.request.actionId,
-      this.request.args ?? parsedArgs
+      this.mergeArgs(this.request.args, parsedArgs)
     );
     for (const line of splitJsonl(jsonl)) {
       this.callbacks.onA2uiJsonl?.(line);
@@ -48,21 +53,87 @@ class AiphoneTool implements AgentTool {
     return jsonl;
   }
 
-  private parseInputArgs(input: string): Object | null {
-    const trimmed = input.trim();
-    if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
-      return null;
+  private mergeArgs(baseArgs: Object | undefined, overrideArgs: Object | null): Object | null {
+    if (baseArgs === undefined || baseArgs === null) {
+      return overrideArgs;
     }
+    if (overrideArgs === null) {
+      return baseArgs;
+    }
+    const merged = JSON.parse(JSON.stringify(baseArgs)) as Record<string, Object | string | number | boolean | null | undefined>;
+    const overrides = overrideArgs as Record<string, Object | string | number | boolean | null | undefined>;
+    Object.keys(overrides).forEach((key: string) => {
+      merged[key] = overrides[key];
+    });
+    return merged;
+  }
+
+  private parseInputArgs(input: string): Object | null {
+    return parseLoopToolInputArgs(input);
+  }
+
+  private runMemoryUpdate(input: string): string {
+    const jsonl = aiphoneInfoJsonl(this.request.surfaceId, '记忆更新请求', input);
+    for (const line of splitJsonl(jsonl)) {
+      this.callbacks.onA2uiJsonl?.(line);
+    }
+    return jsonl;
+  }
+}
+
+function escapeRawLineBreaksInJsonStrings(value: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < value.length; index++) {
+    const char = value.charAt(index);
+    if (escaped) {
+      result += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      result += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      result += char;
+      continue;
+    }
+    if (inString && (char === '\n' || char === '\r')) {
+      if (char === '\r' && index + 1 < value.length && value.charAt(index + 1) === '\n') {
+        index++;
+      }
+      result += '\\n';
+      continue;
+    }
+    result += char;
+  }
+  return result;
+}
+
+export function parseLoopToolInputArgs(input: string): Object | null {
+  const trimmed = input.trim();
+  if (trimmed.length === 0 || trimmed.charAt(0) !== '{') {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as Object | null;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (_error) {
     try {
-      const parsed = JSON.parse(trimmed) as Object | null;
+      const parsed = JSON.parse(escapeRawLineBreaksInJsonStrings(trimmed)) as Object | null;
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed;
       }
-    } catch (_error) {
-      return null;
+    } catch (_repairError) {
     }
-    return null;
   }
+  return null;
 }
 
 export class LoopBackend {
@@ -163,8 +234,14 @@ export class LoopBackend {
       ));
     }
     registry.register(new AiphoneTool(
+      'memory.update',
+      'memory.update inputSchema=personaMemoryUpdate outputSchema=personaMemoryUpdateCard. Use only when the user states a durable preference, identity fact, or stable constraint that should affect future turns for the active persona. Do not use for one-off tasks. Input must be JSON with personaId, summary, memoryText, reason, and optional suggestedAction { label, prompt, toolId }. Default to the active persona when the user does not name another persona. This tool only records memory; it does not search providers or fabricate results.',
+      request,
+      callbacks
+    ));
+    registry.register(new AiphoneTool(
       'dynamic.search',
-      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
+      'dynamic.search inputSchema=dynamicToolSearchQuery outputSchema=dynamicToolConnect. Use for ModelScope/remote MCP discovery, weather requests, Composio-backed app/toolkit requests, and domains not covered by fixed tools. For weather, dynamic.search discovers weather.query/maps.weather. For Composio, first call with the full user task to discover candidate tools; only call again with {"operation":"execute","toolSlug":"returned slug","arguments":{...}} for read/search/list/get actions. Do not use Composio for payment, Gmail, Calendar, SocialHub, Maps, Food, Travel, or other fixed-tool domains unless the user explicitly asks for an unsupported external app/toolkit. For ferry or boat ticket requests, use dynamic.search; fixed travel tools only cover train and flight options, and dynamic.search may return no_tool_found truthfully.',
       request,
       callbacks
     ));
@@ -181,6 +258,12 @@ export class LoopBackend {
       description += '. Use for flight, airline, airport, or flight-board requests.';
     } else if (definition.toolId === 'food.search') {
       description += '. Use for restaurants, cafes, coffee, milk tea, drinks, McDonalds, Luckin, menus, coupons, delivery, and food or beverage places near a location.';
+    } else if (definition.toolId === 'social.feed.search') {
+      description += '. Use for SocialHub aggregate X/Twitter, Slack, and WeCom feed or connection-state requests. Never fabricate social messages.';
+    } else if (definition.toolId === 'social.reply.draft') {
+      description += '. Use only to draft a reply after a real SocialHub item is selected. Include itemId, platform, and instruction when available. Do not send.';
+    } else if (definition.toolId === 'x.post.search') {
+      description += '. Use only for explicit X/Twitter/x.com public post searches, not arbitrary letter X or Xcode requests. Never fabricate posts.';
     } else if (definition.toolId === 'maps.place.search') {
       description += '. Use for explicit Google Maps/Google Places searches, non-food places, addresses, and POIs. If the user asks for cafes, coffee, milk tea, restaurants, menus, or delivery without explicitly asking for Google Maps, use food.search.';
     } else if (definition.toolId === 'mail.search') {
@@ -190,7 +273,7 @@ export class LoopBackend {
     } else if (definition.toolId === 'mail.draft.create') {
       description += '. Use for aggregate mail reply drafts after a real mail row is selected. Include provider, messageId or threadId, to, subject, and body when available.';
     } else if (definition.toolId === 'gmail.mail.search') {
-      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Generate args.query from the user request; never fabricate Gmail messages.';
+      description += '. Use for searching, listing, or viewing Gmail messages, inboxes, important mail, or keyword-based mail queries. Required Action input is a JSON object with args.query; do not pass plain keywords. Generate args.query from the user request; never fabricate Gmail messages. For Chinese academic or application queries, keep user-provided acronyms or names and expand the Gmail query with likely English terms: paper, manuscript, submission, review, conference, journal, camera-ready, admission decision, offer letter, accepted, admitted, congratulations, waitlist, rejection, application status. Use Gmail OR grouping like {user_acronym OR paper OR manuscript OR submission OR review}; do not space-AND every term. Keep the query focused to the relevant 6-10 OR terms.';
     } else if (definition.toolId === 'gmail.thread.read') {
       description += '. Use only when the user asks to read a specific Gmail thread and a threadId is available.';
     } else if (definition.toolId === 'gmail.draft.create') {
@@ -209,6 +292,10 @@ export class LoopBackend {
       description += '. Use for reading Google Calendar events or schedules.';
     } else if (definition.toolId === 'calendar.event.create') {
       description += '. Use for drafting or creating Google Calendar events; confirm_required.';
+    } else if (definition.toolId === 'payment.send') {
+      description += '. Use for explicit PayPal account payments, Stripe connected merchant Checkout, or opening a stored Stripe Payment Link. If the user says Google Pay, treat it as args.fundingSource="google_pay" with provider still PayPal or Stripe; Google Pay is not a separate provider/tool. Always produce a confirmation/payment UI before checkout. Never claim money was sent without a real provider confirmation.';
+    } else if (definition.toolId === 'payment.account.setup') {
+      description += '. Use when the user wants to create, bind, open, verify, or refresh the current agent Stripe receiving account. Do not use this for paying someone; payment.send handles payments.';
     }
     return description;
   }

@@ -17,20 +17,27 @@ const BUILT_IN_TOOL_IDS: string[] = [
   'travel.search',
   'flight.search',
   'train.search',
-  'food.search',
-  'social.reply.send'
+  'food.search'
 ];
 
 const UNSAFE_TOOL_PATTERNS: string[] = [
   'book',
   'pay',
+  'create',
   'create_order',
   'submit_order',
+  'send',
+  'update',
+  'delete',
   'cancel',
   'refund',
   'redeem',
   'grab_ticket',
-  'purchase'
+  'purchase',
+  'transfer',
+  'post',
+  'invite',
+  'share'
 ];
 
 export function isBuiltInToolId(toolId: string): boolean {

@@ -5,8 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const harmonyRoot = resolve(scriptDir, '..');
-const repoRoot = resolve(harmonyRoot, '..');
+const repoRoot = resolve(scriptDir, '..');
 const hvigor = '/Applications/DevEco-Studio.app/Contents/tools/hvigor/hvigor/bin/hvigor.js';
 const sdkHome = process.env.DEVECO_SDK_HOME || '/Applications/DevEco-Studio.app/Contents/sdk';
 
@@ -62,7 +61,7 @@ function runHarBuild() {
     '--incremental',
     '--daemon'
   ], {
-    cwd: harmonyRoot,
+    cwd: repoRoot,
     env: {
       ...process.env,
       DEVECO_SDK_HOME: sdkHome
@@ -80,17 +79,21 @@ function runHarBuild() {
 }
 
 function verifySourceContracts() {
-  const protocol = read('harmony/agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
-  const llmProvider = read('harmony/agent_core/src/main/ets/model/LlmProvider.ets');
-  const openAiModel = read('harmony/agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
-  const aiphoneA2ui = read('harmony/agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
-  const definitions = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
-  const executor = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
-  const backend = read('harmony/agent_core/src/main/ets/aiphone/LoopBackend.ets');
-  const index = read('harmony/agent_core/Index.ets');
-  const runtimeDefinitions = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
-  const runtimeGateway = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
-  const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
+  const protocol = read('agent_core/src/main/ets/a2ui/A2uiProtocol.ets');
+  const llmProvider = read('agent_core/src/main/ets/model/LlmProvider.ets');
+  const openAiModel = read('agent_core/src/main/ets/model/OpenAiCompatibleModel.ets');
+  const aiphoneA2ui = read('agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
+  const definitions = read('agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
+  const executor = read('agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
+  const backend = read('agent_core/src/main/ets/aiphone/LoopBackend.ets');
+  const runner = read('agent_core/src/main/ets/agent/ReActAgentRunner.ets');
+  const index = read('agent_core/Index.ets');
+  const runtimeDefinitions = read('agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
+  const runtimeGateway = read('agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
+  const composioConfig = read('agent_core/src/main/ets/composio/ComposioConfig.ets');
+  const composioClient = read('agent_core/src/main/ets/composio/ComposioSessionClient.ets');
+  const composioDynamic = read('agent_core/src/main/ets/aiphone/runtime/ComposioDynamicBackend.ets');
+  const runtimeDir = resolve(repoRoot, 'agent_core/src/main/ets/aiphone/runtime');
 
   assertContains(protocol, "export const A2UI_VERSION = 'v0.9.1';", 'AIPhone A2UI version is v0.9.1');
   assertContains(llmProvider, "endsWith('/v1/chat/completions')", 'model base URL can be full chat completions URL');
@@ -114,7 +117,9 @@ function verifySourceContracts() {
     'train.search',
     'flight.search',
     'food.search',
-    'social.reply.send',
+    'social.feed.search',
+    'social.reply.draft',
+    'x.post.search',
     'mail.search',
     'mail.thread.read',
     'mail.draft.create',
@@ -137,7 +142,7 @@ function verifySourceContracts() {
   assert(ids.every((id) => runtimeUniqueIds.has(id)), 'public and runtime tool registries align');
 
   const runtimeFiles = readdirSync(runtimeDir).filter((name) => name.endsWith('.ets'));
-  assert(runtimeFiles.length >= 30, 'AIPhone runtime files are vendored into Loopy', `found ${runtimeFiles.length}`);
+  assert(runtimeFiles.length >= 30, 'AIPhone runtime files are vendored into agent_core', `found ${runtimeFiles.length}`);
 
   assertContains(executor, 'isRegisteredToolId(toolId)', 'executor rejects unknown tools through runtime registry');
   assertContains(executor, 'callToolGateway(', 'executor delegates to runtime tool gateway');
@@ -154,10 +159,12 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalYouTubeTool', 'runtime includes YouTube execution');
   assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');
   assertContains(runtimeGateway, 'async function callLocalMapsTool', 'runtime includes Maps execution');
+  assertContains(runtimeGateway, 'async function callLocalSocialHubTool', 'runtime includes SocialHub execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
+  assertContains(runtimeGateway, 'callComposioDynamic', 'dynamic.search tries Composio fallback');
   assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
-  assertContains(runtimeGateway, '不会假装发送成功', 'runtime does not fake social sends');
+  assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
 
   assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
   assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
@@ -166,14 +173,23 @@ function verifySourceContracts() {
   assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
   assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
+  assertContains(backend, 'Composio-backed app/toolkit requests', 'LoopBackend describes Composio dynamic routing');
+  assertContains(backend, 'Keep the query focused to the relevant 6-10 OR terms', 'LoopBackend preserves Gmail academic query expansion guidance');
+  assertContains(runner, 'isA2uiObservation(observation)', 'ReAct runner stops after A2UI tool observations');
 
-  assertContains(index, "export { LoopBackend }", 'public export includes LoopBackend');
+  assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
   assertContains(index, 'configureLocalProviderConfigFromRawJson', 'public export includes provider raw JSON config');
   assertContains(index, 'prepareGmailOAuthAuthorizationUrl', 'public export includes Gmail OAuth helper');
   assertContains(index, 'AssetCredentialStore', 'public export includes dynamic credential store');
+  assertContains(index, 'ComposioConfig', 'public export includes ComposioConfig');
+  assertContains(index, 'ComposioDynamicBackend', 'public export includes Composio dynamic backend');
+  assertContains(composioConfig, 'fromRawJson', 'Composio config can load raw JSON');
+  assertContains(composioClient, 'tool_router/session', 'Composio client uses tool router sessions');
+  assertContains(composioDynamic, 'isComposioDynamicPrompt', 'Composio dynamic backend gates unsupported app queries');
+  assertContains(composioDynamic, 'unsafe_action_blocked', 'Composio dynamic backend blocks unsafe execute');
 }
 
 runHarBuild();

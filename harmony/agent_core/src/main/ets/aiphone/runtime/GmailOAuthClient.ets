@@ -173,6 +173,96 @@ function pageSizeArg(args: GmailArgRecord): number {
   return value > 10 ? 10 : value;
 }
 
+function isAsciiSearchChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    char === '_' || char === '-' || char === '.';
+}
+
+function isCjkSearchChar(char: string): boolean {
+  const code = char.charCodeAt(0);
+  return code >= 0x4e00 && code <= 0x9fff;
+}
+
+function stripCjkMailScaffold(value: string): string {
+  const stops = [
+    '帮我', '请', '一下', '查看', '看看', '看', '搜索', '查询', '查找', '查',
+    'Gmail', '谷歌邮箱', '谷歌邮件', '邮箱', '邮件', '收件箱',
+    '里面', '里', '中', '关于', '有关', '相关', '最新', '最近', '重要', '和我', '我的', '我', '的'
+  ];
+  let text = value;
+  stops.forEach((stop: string) => {
+    text = text.split(stop).join('');
+  });
+  return text.trim();
+}
+
+function gmailSearchTermsFromPrompt(prompt: string): string {
+  const tokens: string[] = [];
+  let token = '';
+  let tokenKind = '';
+  const pushToken = (): void => {
+    if (token.length === 0) {
+      return;
+    }
+    const cleaned = tokenKind === 'cjk' ? stripCjkMailScaffold(token) : token.trim();
+    const lower = cleaned.toLowerCase();
+    if (cleaned.length > 0 && lower !== 'gmail' && lower !== 'mail' && lower !== 'email') {
+      tokens.push(cleaned);
+    }
+    token = '';
+    tokenKind = '';
+  };
+
+  for (let index = 0; index < prompt.length; index++) {
+    const char = prompt.charAt(index);
+    const kind = isAsciiSearchChar(char) ? 'ascii' : (isCjkSearchChar(char) ? 'cjk' : '');
+    if (kind.length === 0) {
+      pushToken();
+      continue;
+    }
+    if (tokenKind.length > 0 && tokenKind !== kind) {
+      pushToken();
+    }
+    tokenKind = kind;
+    token += char;
+  }
+  pushToken();
+  // ponytail: fallback only when the model omitted args.query; structured model args remain source of truth.
+  if (tokens.length <= 1) {
+    return tokens.join('');
+  }
+  return '{' + tokens.join(' OR ') + '}';
+}
+
+function hasCjkText(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    if (isCjkSearchChar(value.charAt(index))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeBareMixedLanguageQuery(query: string): string {
+  const trimmed = query.trim();
+  if (!hasCjkText(trimmed) ||
+    trimmed.indexOf('{') >= 0 ||
+    trimmed.indexOf('}') >= 0 ||
+    trimmed.indexOf('"') >= 0 ||
+    trimmed.indexOf(':') >= 0 ||
+    trimmed.indexOf(' OR ') >= 0) {
+    return query;
+  }
+  const terms = trimmed.split(' ').filter((term: string) => term.length > 0);
+  if (terms.length <= 1) {
+    return query;
+  }
+  return '{' + terms.join(' OR ') + '}';
+}
+
 function charCount(value: string, target: string): number {
   let count = 0;
   for (let index = 0; index < value.length; index++) {
@@ -217,86 +307,24 @@ function removeDanglingQuoteAfterClosedGroup(query: string): string {
   return query;
 }
 
-function isAsciiMailKeywordToken(value: string): boolean {
-  if (!/^[A-Za-z0-9_.@-]+$/.test(value)) {
-    return false;
-  }
-  const lower = value.toLowerCase();
-  return lower !== 'gmail' && lower !== 'mail' && lower !== 'email';
-}
-
-function isGenericMailSearchToken(value: string): boolean {
-  const lower = value.toLowerCase();
-  return lower === '论文' ||
-    lower === '邮件' ||
-    lower === '邮箱' ||
-    lower === '相关' ||
-    lower === '相关邮件' ||
-    lower === '最新' ||
-    lower === '最新的' ||
-    lower === '重要' ||
-    lower === '收件箱' ||
-    lower === 'paper' ||
-    lower === 'papers';
-}
-
-function compactAsciiMailKeywordQuery(query: string): string {
-  if (query.indexOf('"') >= 0 || query.indexOf(':') >= 0 || query.indexOf(' OR ') >= 0) {
-    return query;
-  }
-  const tokens = query.split(/\s+/).filter((token: string): boolean => token.trim().length > 0);
-  const asciiTokens: string[] = [];
-  let hasSpecificNonAsciiToken = false;
-  tokens.forEach((token: string) => {
-    const trimmed = token.trim();
-    if (isAsciiMailKeywordToken(trimmed)) {
-      asciiTokens.push(trimmed);
-    } else if (!isGenericMailSearchToken(trimmed)) {
-      hasSpecificNonAsciiToken = true;
-    }
-  });
-  if (asciiTokens.length > 0 && !hasSpecificNonAsciiToken) {
-    return asciiTokens.join(' ');
-  }
-  return query;
-}
-
-function fallbackGmailSearchQuery(prompt: string): string {
-  const trimmed = prompt.trim();
-  if (/eccv/i.test(trimmed)) {
-    return 'eccv';
-  }
-  if (/最新|重要|收件箱|inbox|important/i.test(trimmed)) {
-    return 'newer_than:30d';
-  }
-  let current = '';
-  let last = '';
-  for (let index = 0; index < trimmed.length; index++) {
-    const char = trimmed.charAt(index);
-    if (/^[A-Za-z0-9_.@-]$/.test(char)) {
-      current += char;
-    } else if (current.length > 0) {
-      if (isAsciiMailKeywordToken(current)) {
-        last = current;
-      }
-      current = '';
-    }
-  }
-  if (current.length > 0 && isAsciiMailKeywordToken(current)) {
-    last = current;
-  }
-  return last;
-}
-
-function gmailSearchQueryFromArgs(args: GmailArgRecord, prompt: string): string {
+function gmailSearchQueryFromArgs(args: GmailArgRecord): string {
   let query = stringArg(args, 'query').trim();
+  let usedPromptFallback = false;
   if (query.length === 0) {
-    query = fallbackGmailSearchQuery(prompt);
+    const prompt = stringArg(args, 'prompt').trim();
+    query = prompt.length > 0 ? gmailSearchTermsFromPrompt(prompt) : '';
+    usedPromptFallback = query.length > 0;
   }
   if (query.length === 0) {
     query = 'newer_than:30d';
+  } else if (usedPromptFallback &&
+    query.indexOf('newer_than:') < 0 &&
+    query.indexOf('older_than:') < 0 &&
+    query.indexOf('after:') < 0 &&
+    query.indexOf('before:') < 0) {
+    query = 'newer_than:30d ' + query;
   }
-  query = compactAsciiMailKeywordQuery(query);
+  query = normalizeBareMixedLanguageQuery(query);
   query = removeDanglingQuoteAfterClosedGroup(query);
   if (query.indexOf('-in:draft') < 0) {
     query += ' -in:draft';
@@ -471,7 +499,31 @@ function tokenResponseSummary(response: GoogleOAuthTokenResponse): string {
     ' scopeChars=' + textOf(response.scope).length.toString();
 }
 
-async function postGoogleTokenForm(body: string): Promise<GoogleOAuthTokenResponse> {
+function describeTokenRequestError(error: Error | Object | string | number | boolean | null | undefined): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (typeof error === 'number' || typeof error === 'boolean') {
+    return error.toString();
+  }
+  const json = JSON.stringify(error);
+  return json.length > 0 && json !== '{}' ? json : String(error);
+}
+
+function isTransientTokenRequestError(error: Error | Object | string | number | boolean | null | undefined): boolean {
+  const message = describeTokenRequestError(error);
+  return message.indexOf('Operation timeout') >= 0 || message.indexOf('2300028') >= 0 ||
+    message.indexOf('Internal error') >= 0 || message.indexOf('2300999') >= 0;
+}
+
+async function postGoogleTokenFormOnce(
+  body: string,
+  connectTimeoutMs: number,
+  readTimeoutMs: number
+): Promise<GoogleOAuthTokenResponse> {
   const request = http.createHttp();
   try {
     const response = await request.request(GOOGLE_OAUTH_TOKEN_URL, {
@@ -481,8 +533,8 @@ async function postGoogleTokenForm(body: string): Promise<GoogleOAuthTokenRespon
         'Accept': 'application/json'
       },
       extraData: body,
-      connectTimeout: 10000,
-      readTimeout: 20000
+      connectTimeout: connectTimeoutMs,
+      readTimeout: readTimeoutMs
     });
     const text = responseText(response.result);
     const payload = JSON.parse(text) as GoogleOAuthTokenResponse;
@@ -501,6 +553,25 @@ async function postGoogleTokenForm(body: string): Promise<GoogleOAuthTokenRespon
   } finally {
     request.destroy();
   }
+}
+
+async function postGoogleTokenForm(body: string): Promise<GoogleOAuthTokenResponse> {
+  const connectTimeouts: number[] = [10000, 20000];
+  const readTimeouts: number[] = [20000, 30000];
+  let lastError = '';
+  for (let attempt = 0; attempt < connectTimeouts.length; attempt++) {
+    try {
+      return await postGoogleTokenFormOnce(body, connectTimeouts[attempt], readTimeouts[attempt]);
+    } catch (error) {
+      lastError = describeTokenRequestError(error);
+      if (!isTransientTokenRequestError(error) || attempt >= connectTimeouts.length - 1) {
+        throw new Error(lastError);
+      }
+      aiLogInfo('[AIPhone][GmailOAuthTokenRetry] attempt=' + (attempt + 2).toString() +
+        ' reason=' + lastError.substring(0, 160));
+    }
+  }
+  throw new Error(lastError);
 }
 
 export async function exchangeGmailOAuthCode(
@@ -631,8 +702,11 @@ export function gmailMcpToolNameForToolId(toolId: string): string {
 
 export function gmailMcpArgsForPrompt(toolId: string, prompt: string, args: Object | null = null): Object {
   const record = gmailArgRecord(args);
+  if (textOf(record.prompt).trim().length === 0) {
+    record.prompt = prompt;
+  }
   if (toolId === 'gmail.mail.search') {
-    return new GmailSearchThreadsArgs(gmailSearchQueryFromArgs(record, prompt), pageSizeArg(record));
+    return new GmailSearchThreadsArgs(gmailSearchQueryFromArgs(record), pageSizeArg(record));
   }
   if (toolId === 'gmail.thread.read') {
     const threadId = stringArg(record, 'threadId').trim();

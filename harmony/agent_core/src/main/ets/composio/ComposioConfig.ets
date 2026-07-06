@@ -56,6 +56,19 @@ export class ComposioConfig {
     }
   }
 
+  static fromRawJson(rawJson: string): ComposioConfig {
+    try {
+      const parsed = JSON.parse(rawJson) as ComposioConfigJson;
+      return new ComposioConfig(
+        parsed.apiKey ?? '',
+        parsed.baseUrl ?? DEFAULT_COMPOSIO_URL,
+        parsed.userId ?? ''
+      );
+    } catch (_error) {
+      return new ComposioConfig('', DEFAULT_COMPOSIO_URL, '');
+    }
+  }
+
   private static trimTrailingSlash(value: string): string {
     let result = value.trim();
     while (result.endsWith('/')) {

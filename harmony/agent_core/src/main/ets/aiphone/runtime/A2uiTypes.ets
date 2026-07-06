@@ -1,3 +1,10 @@
+import {
+  SocialHubConnectionData,
+  SocialHubData,
+  SocialHubDraftData,
+  SocialHubItemData
+} from './SocialHubTypes';
+
 export const A2UI_VERSION: string = 'v0.9.1';
 export const A2UI_MIME: string = 'application/a2ui+json';
 
@@ -13,11 +20,12 @@ export const A2UI_COMPONENT_TRAIN_OPTIONS: string = 'TrainOptions';
 export const A2UI_COMPONENT_FLIGHT_BOARD: string = 'FlightBoard';
 export const A2UI_COMPONENT_TRAVEL_OPTIONS: string = 'TravelOptions';
 export const A2UI_COMPONENT_FOOD_CHOICES: string = 'FoodChoices';
-export const A2UI_COMPONENT_SOCIAL_INBOX: string = 'SocialInbox';
 export const A2UI_COMPONENT_CONFIRM_PANEL: string = 'ConfirmPanel';
 export const A2UI_COMPONENT_INFO_ROWS: string = 'InfoRows';
 export const A2UI_COMPONENT_TOOL_CONNECT_CARD: string = 'ToolConnectCard';
 export const A2UI_COMPONENT_GENERIC_TOOL_RESULTS: string = 'GenericToolResults';
+export const A2UI_COMPONENT_SOCIAL_HUB: string = 'SocialHub';
+export const A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD: string = 'StripeReceivingAccountCard';
 
 export interface A2uiAction {
   id: string;
@@ -89,35 +97,6 @@ export interface A2uiFoodData {
   sourceTags?: string[];
 }
 
-export interface A2uiSocialMessageData {
-  id: string;
-  platform: string;
-  conversationId: string;
-  conversationTitle: string;
-  senderName: string;
-  preview: string;
-  receivedAt: string;
-  source: string;
-  status: string;
-}
-
-export interface A2uiSocialReplyData {
-  id: string;
-  targetMessageId: string;
-  platform: string;
-  conversationId: string;
-  text: string;
-  status: string;
-  error: string;
-  sentAt: string;
-}
-
-export interface A2uiSocialData {
-  messages: A2uiSocialMessageData[];
-  replies: A2uiSocialReplyData[];
-  diagnostics: A2uiLabelValueData[];
-}
-
 export interface A2uiSummaryData {
   text: string;
   toolName: string;
@@ -179,13 +158,41 @@ export interface A2uiGenericToolResultData {
   rawPreview: string;
 }
 
+export interface A2uiPersonaData {
+  id: string;
+  name: string;
+  avatarKey: string;
+  status: string;
+  reason: string;
+}
+
+export interface A2uiPersonaMemoryData {
+  summary: string;
+  preferences: string[];
+}
+
+export interface StripeReceivingAccountCardData {
+  status: string;
+  title: string;
+  message: string;
+  agentId: string;
+  deviceId: string;
+  displayName: string;
+  email: string;
+  country: string;
+  businessType: string;
+  stripeAccountId: string;
+  onboardingUrl: string;
+  currentlyDue: string[];
+  actions: A2uiAction[];
+}
+
 export interface A2uiRuntimeDataModel {
   rows: A2uiLabelValueData[];
   trains: A2uiTrainData[];
   flights: A2uiFlightData[];
   travelOptions: A2uiTravelOptionData[];
   foods: A2uiFoodData[];
-  social: A2uiSocialData;
   thoughts: string[];
   summary: A2uiSummaryData;
   trip: A2uiTripData;
@@ -194,6 +201,10 @@ export interface A2uiRuntimeDataModel {
   toolRequest: A2uiToolRequestData;
   dynamicToolConnect: A2uiDynamicToolConnectData;
   genericToolResults: A2uiGenericToolResultData[];
+  socialHub: SocialHubData;
+  persona: A2uiPersonaData;
+  personaMemory: A2uiPersonaMemoryData;
+  stripeReceivingAccount?: StripeReceivingAccountCardData;
   toolRequests?: A2uiToolRequestData[];
 }
 
@@ -204,9 +215,6 @@ export type A2uiDataValue =
   A2uiFlightData[] |
   A2uiTravelOptionData[] |
   A2uiFoodData[] |
-  A2uiSocialMessageData[] |
-  A2uiSocialReplyData[] |
-  A2uiSocialData |
   string[] |
   A2uiSummaryData |
   A2uiTripData |
@@ -215,6 +223,14 @@ export type A2uiDataValue =
   A2uiToolRequestData |
   A2uiDynamicToolConnectData |
   A2uiGenericToolResultData[] |
+  A2uiPersonaData |
+  A2uiPersonaMemoryData |
+  StripeReceivingAccountCardData |
+  SocialHubData |
+  SocialHubItemData[] |
+  SocialHubItemData |
+  SocialHubDraftData |
+  SocialHubConnectionData[] |
   A2uiToolRequestData[] |
   string |
   number |
@@ -349,11 +365,12 @@ export function defaultA2uiCapabilities(): A2uiClientCapabilities {
       A2UI_COMPONENT_FLIGHT_BOARD,
       A2UI_COMPONENT_TRAVEL_OPTIONS,
       A2UI_COMPONENT_FOOD_CHOICES,
-      A2UI_COMPONENT_SOCIAL_INBOX,
       A2UI_COMPONENT_CONFIRM_PANEL,
       A2UI_COMPONENT_INFO_ROWS,
       A2UI_COMPONENT_TOOL_CONNECT_CARD,
-      A2UI_COMPONENT_GENERIC_TOOL_RESULTS
+      A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
+      A2UI_COMPONENT_SOCIAL_HUB,
+      A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD
     ],
     transport: ['jsonl', 'openai-compatible-sse']
   };
