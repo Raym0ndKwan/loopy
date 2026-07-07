@@ -129,7 +129,7 @@ import { ReActAgentRunner, ToolRegistry, createLoopModel } from '@loop/agent-cor
 
 ## Conversation memory
 
-Loop keeps a simple in-session history of user messages and final assistant answers in `ConversationContext`. Each successful run appends one user/assistant pair; failed runs are not stored. Use **Clear** to reset the session.
+Loop keeps a history of user messages and final assistant answers in `ConversationContext`. Each successful run appends one user/assistant pair; failed runs are not stored. History is persisted to device preferences via `ConversationStore` and restored on launch (last 50 turns). Use **Clear** to reset the session and wipe stored history.
 
 ## AGenUI (generative UI)
 

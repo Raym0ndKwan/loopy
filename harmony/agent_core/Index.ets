@@ -1,4 +1,5 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
+export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { ToolRegistry, ToolRegistryCloseHandler, createConfiguredLoopToolRegistry, createLoopToolRegistry } from './src/main/ets/agent/ToolRegistry';

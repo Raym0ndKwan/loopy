@@ -4,12 +4,16 @@ import {
   AgentEvent,
   AgentEventKind,
   A2uiAgentRunner,
+  clearStoredConversation,
   ConversationContext,
+  ConversationRole,
   createA2uiModelInfo,
   createConfiguredLoopToolRegistry,
   createLoopModelInfo,
+  loadConversation,
   parseJsonl,
   ReActAgentRunner,
+  saveConversation,
   ScriptedA2uiModel,
   ToolRegistry,
   UiRenderHandler
@@ -19,11 +23,12 @@ import { hasRenderableRoot, parseComponentsFromJsonl } from '../agenui/A2uiFallb
 import { componentsFromUiEvent } from '../agenui/LoopUiApplier';
 
 const MAX_STEPS = 6;
+const WELCOME_TRANSCRIPT = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
 
 @Entry
 @Component
 struct Index {
-  @State transcript: string = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+  @State transcript: string = WELCOME_TRANSCRIPT;
   @State message: string = '';
   @State sending: boolean = false;
   @State modelStatus: string = 'Checking model…';
@@ -40,6 +45,7 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    this.restoreConversation();
     this.toolRegistryPromise = createConfiguredLoopToolRegistry(this.getAbilityContext());
     createLoopModelInfo(this.getAbilityContext()).then((info) => {
       this.updateModelStatus(info.mode, info.modelName);
@@ -192,6 +198,7 @@ struct Index {
       if (finalAnswer !== null) {
         this.conversation.addUser(task);
         this.conversation.addAssistant(finalAnswer);
+        saveConversation(this.getAbilityContext(), this.conversation);
       }
       this.sending = false;
     }
@@ -245,9 +252,29 @@ struct Index {
     }
   }
 
+  private restoreConversation(): void {
+    this.conversation = loadConversation(this.getAbilityContext());
+    this.transcript = this.buildTranscriptFromConversation(this.conversation);
+  }
+
+  private buildTranscriptFromConversation(conversation: ConversationContext): string {
+    const turns = conversation.toChatMessages();
+    if (turns.length === 0) {
+      return WELCOME_TRANSCRIPT;
+    }
+
+    let transcript = WELCOME_TRANSCRIPT.trim();
+    for (const turn of turns) {
+      const speaker = turn.role === ConversationRole.USER ? 'You' : 'Loop';
+      transcript += `\n\n${speaker}\n${turn.content}`;
+    }
+    return `${transcript}\n`;
+  }
+
   private clearConversation(): void {
     this.conversation.clear();
-    this.transcript = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+    clearStoredConversation(this.getAbilityContext());
+    this.transcript = WELCOME_TRANSCRIPT;
     this.uiComponents = [];
     this.hasUiPanel = false;
     this.lastUiTask = '';
