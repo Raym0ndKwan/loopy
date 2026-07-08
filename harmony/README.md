@@ -96,7 +96,8 @@ The regular Loop chat registers a `modelscope` meta tool. For the current demo i
 to ModelScope from the phone, without a local Gateway.
 
 Copy `entry/src/main/resources/rawfile/modelscope_config.example.json` to
-`entry/src/main/resources/rawfile/modelscope_config.json` and configure:
+`entry/src/main/resources/rawfile/modelscope_config.json` and configure (the local file is
+ignored by Git):
 
 ```json
 {

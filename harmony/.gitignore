@@ -13,9 +13,10 @@
 oh_modules/
 entry/oh_modules/
 
-# Local secrets — use llm_config.example.json
+# Local secrets — use *.example.json templates
 **/rawfile/llm_config.json
 **/rawfile/composio_config.json
+**/rawfile/modelscope_config.json
 
 # AGenUI HAR (fetch via scripts/fetch-agenui.sh)
 libs/*.har
