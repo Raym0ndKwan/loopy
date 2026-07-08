@@ -4,6 +4,9 @@ import { common } from '@kit.AbilityKit';
 import { ComposioConfig } from '../composio/ComposioConfig';
 import { ComposioSessionClient } from '../composio/ComposioSessionClient';
 import { ComposioTool } from '../composio/ComposioTool';
+import { ModelScopeConfig } from '../modelscope/ModelScopeConfig';
+import { ModelScopeDirectClient } from '../modelscope/ModelScopeDirectClient';
+import { ModelScopeTool } from '../modelscope/ModelScopeTool';
 
 export type ToolRegistryCloseHandler = () => Promise<void>;
 
@@ -85,6 +88,10 @@ export async function createConfiguredLoopToolRegistry(context: common.UIAbility
   await client.initialize();
   registry.register(new ComposioTool(client));
   registry.registerCloseHandler(async (): Promise<void> => client.close());
+  const modelScopeConfig = await ModelScopeConfig.fromContext(context);
+  const modelScopeClient = new ModelScopeDirectClient(modelScopeConfig);
+  await modelScopeClient.initialize();
+  registry.register(new ModelScopeTool(modelScopeClient));
   return registry;
 }
 

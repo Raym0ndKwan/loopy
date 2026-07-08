@@ -90,6 +90,27 @@ the scoped project `apiKey` plus the stable connected-account `userId`. The loca
 by Git. Discovered tools execute immediately, including tools with side effects; production apps
 should proxy Composio through their own backend.
 
+## ModelScope MCP
+
+The regular Loop chat registers a `modelscope` meta tool. For the current demo it connects directly
+to ModelScope from the phone, without a local Gateway.
+
+Copy `entry/src/main/resources/rawfile/modelscope_config.example.json` to
+`entry/src/main/resources/rawfile/modelscope_config.json` and configure:
+
+```json
+{
+  "mode": "direct",
+  "modelscopeApiBaseUrl": "https://modelscope.cn",
+  "modelscopeToken": "your ModelScope token"
+}
+```
+
+The phone calls ModelScope's operational MCP API itself, lists the activated Hosted MCP tools, and
+directly calls each Streamable HTTP MCP endpoint. This packages the ModelScope token into the app
+rawfile and executes discovered tools immediately, so it is for internal demos only and must not be
+shipped as a production architecture.
+
 ## Source layout
 
 ```text

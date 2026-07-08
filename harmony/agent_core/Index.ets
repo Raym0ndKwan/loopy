@@ -13,6 +13,11 @@ export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/
 export { ComposioConfig } from './src/main/ets/composio/ComposioConfig';
 export { ComposioSessionClient } from './src/main/ets/composio/ComposioSessionClient';
 export { ComposioTool } from './src/main/ets/composio/ComposioTool';
+export { ModelScopeClient } from './src/main/ets/modelscope/ModelScopeClient';
+export { ModelScopeConfig } from './src/main/ets/modelscope/ModelScopeConfig';
+export { ModelScopeDirectClient } from './src/main/ets/modelscope/ModelScopeDirectClient';
+export { ModelScopeMcpTool, StreamableMcpClient } from './src/main/ets/modelscope/StreamableMcpClient';
+export { ModelScopeTool } from './src/main/ets/modelscope/ModelScopeTool';
 export { A2UI_VERSION, AGENUI_CATALOG_ID, buildCreateSurface, buildDeleteSurface, parseJsonl, extractJsonObjects, newSurfaceId } from './src/main/ets/a2ui/A2uiProtocol';
 export { A2uiComponentDef, CreateSurfaceBody, UpdateComponentsBody } from './src/main/ets/a2ui/A2uiTypes';
 export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';

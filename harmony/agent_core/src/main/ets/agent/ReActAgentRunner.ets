@@ -113,6 +113,7 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
+    prompt += 'Every tool call must use exactly this syntax on one line: Action: tool_name[input]. The tool name is mandatory; never put raw JSON directly after Action:.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
@@ -121,6 +122,9 @@ export class ReActAgentRunner {
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
     prompt += 'Call composio only when the user request needs one of the authorized toolkits listed in its description. Do not call it for unrelated requests.\n';
     prompt += 'Composio requires two phases: after operation=search returns schemas, call composio again with operation=execute. Do not return Final until execute returns business data or an error.\n';
+    prompt += 'Call modelscope only when the request can use an activated ModelScope MCP. ModelScope requires two phases: first Action: modelscope[{"operation":"search","useCase":"full task"}], then Action: modelscope[{"operation":"execute","qualifiedName":"returned name","arguments":{...}}] with arguments matching inputSchema.\n';
+    prompt += 'When a tool schema needs an exact date and the user says tomorrow, the day after tomorrow, 明天, or 后天, resolve it to YYYY-MM-DD using the time tool or a returned date tool before executing the business tool.\n';
+    prompt += 'Never invent a ModelScope qualifiedName or execute one not returned by search. After a successful ModelScope execution, return Final instead of searching or calling display-only tools.\n';
     prompt += 'After a successful data-returning domain-tool observation, do not call a display-only tool; return Final.\n';
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
@@ -213,6 +217,27 @@ export class ReActAgentRunner {
       return parenCall;
     }
 
+    const jsonCall = this.parseJsonAction(action);
+    if (jsonCall !== null) {
+      return jsonCall;
+    }
+
+    return null;
+  }
+
+  private parseJsonAction(action: string): ToolCall | null {
+    const trimmed = action.trim();
+    if (!trimmed.startsWith('{')) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
+      const operation = `${parsed.operation ?? ''}`;
+      if (operation === 'search' || operation === 'execute') {
+        return new ToolCall('modelscope', trimmed);
+      }
+    } catch (_error) {
+    }
     return null;
   }
 
