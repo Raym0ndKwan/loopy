@@ -10,11 +10,13 @@ import {
   createA2uiModelInfo,
   createConfiguredLoopToolRegistry,
   createLoopModelInfo,
+  createSkillSnapshot,
   loadConversation,
   parseJsonl,
   ReActAgentRunner,
   saveConversation,
   ScriptedA2uiModel,
+  SkillSnapshot,
   ToolRegistry,
   UiRenderHandler
 } from '@loop/agent-core';
@@ -37,17 +39,20 @@ struct Index {
 
   private scroller: Scroller = new Scroller();
   private conversation: ConversationContext = new ConversationContext();
+  private skillSnapshot: SkillSnapshot | null = null;
   private lastUiTask: string = '';
   private toolRegistryPromise: Promise<ToolRegistry> | null = null;
+  private toolRegistryIncludesSkills: boolean = false;
 
   private getAbilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
   }
 
   aboutToAppear(): void {
+    const context = this.getAbilityContext();
     this.restoreConversation();
-    this.toolRegistryPromise = createConfiguredLoopToolRegistry(this.getAbilityContext());
-    createLoopModelInfo(this.getAbilityContext()).then((info) => {
+    this.toolRegistryPromise = createConfiguredLoopToolRegistry(context);
+    createLoopModelInfo(context).then((info) => {
       this.updateModelStatus(info.mode, info.modelName);
     });
   }
@@ -55,6 +60,7 @@ struct Index {
   aboutToDisappear(): void {
     const tools = this.toolRegistryPromise;
     this.toolRegistryPromise = null;
+    this.toolRegistryIncludesSkills = false;
     tools?.then(async (registry: ToolRegistry): Promise<void> => registry.close()).catch((_error: Error): void => {});
   }
 
@@ -166,19 +172,39 @@ struct Index {
     let finalAnswer: string | null = null;
 
     try {
-      const modelInfo = await createLoopModelInfo(this.getAbilityContext());
+      const context = this.getAbilityContext();
+      let modelInfo = await createLoopModelInfo(context);
+      let skillSnapshot: SkillSnapshot | undefined = undefined;
+      if (modelInfo.mode === 'llm') {
+        skillSnapshot = this.skillSnapshot ?? await createSkillSnapshot(context);
+        this.skillSnapshot = skillSnapshot;
+        modelInfo = await createLoopModelInfo(context, skillSnapshot);
+      }
       this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
 
       const uiHandler = await this.buildUiHandler();
-      if (this.toolRegistryPromise === null) {
-        this.toolRegistryPromise = createConfiguredLoopToolRegistry(this.getAbilityContext());
+      if (modelInfo.mode === 'llm' && skillSnapshot !== undefined && !this.toolRegistryIncludesSkills) {
+        const oldTools = this.toolRegistryPromise;
+        oldTools?.then(async (registry: ToolRegistry): Promise<void> => registry.close()).catch((_error: Error): void => {});
+        this.toolRegistryPromise = createConfiguredLoopToolRegistry(context, skillSnapshot);
+        this.toolRegistryIncludesSkills = true;
+      } else if (modelInfo.mode !== 'llm' && this.toolRegistryIncludesSkills) {
+        const oldTools = this.toolRegistryPromise;
+        oldTools?.then(async (registry: ToolRegistry): Promise<void> => registry.close()).catch((_error: Error): void => {});
+        this.toolRegistryPromise = createConfiguredLoopToolRegistry(context);
+        this.toolRegistryIncludesSkills = false;
+      } else if (this.toolRegistryPromise === null) {
+        this.toolRegistryPromise = createConfiguredLoopToolRegistry(context);
+        this.toolRegistryIncludesSkills = false;
       }
       const tools = await this.toolRegistryPromise;
       const runner = new ReActAgentRunner(
         modelInfo.model,
         tools,
         MAX_STEPS,
-        uiHandler
+        uiHandler,
+        skillSnapshot,
+        modelInfo.mode === 'llm'
       );
 
       await runner.run(task, (event: AgentEvent) => {
@@ -187,6 +213,10 @@ struct Index {
         }
         if (event.kind === AgentEventKind.ACTION && event.text.startsWith('ui(')) {
           this.lastUiTask = this.extractToolInput(event.text);
+        }
+        if (event.kind === AgentEventKind.ACTION && event.text.startsWith('write_sandbox_file(')) {
+          this.skillSnapshot = null;
+          this.toolRegistryIncludesSkills = false;
         }
         if (event.kind === AgentEventKind.UI) {
           const uiTask = this.lastUiTask.length > 0 ? this.lastUiTask : task;
@@ -284,6 +314,9 @@ struct Index {
     switch (event.kind) {
       case AgentEventKind.THOUGHT:
         this.appendLine('Loop', event.text);
+        break;
+      case AgentEventKind.SKILL:
+        this.appendLine('Skill', event.text === 'none' ? 'none (continue with tools)' : event.text);
         break;
       case AgentEventKind.ACTION:
         this.appendLine('Tool', event.text);

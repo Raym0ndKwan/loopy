@@ -13,6 +13,7 @@ export { createLoopModel, createLoopModelInfo, LoopModelInfo } from './src/main/
 export { ComposioConfig } from './src/main/ets/composio/ComposioConfig';
 export { ComposioSessionClient } from './src/main/ets/composio/ComposioSessionClient';
 export { ComposioTool } from './src/main/ets/composio/ComposioTool';
+export { SandboxFileWriteTool } from './src/main/ets/file/SandboxFileWriteTool';
 export { ModelScopeClient } from './src/main/ets/modelscope/ModelScopeClient';
 export { ModelScopeConfig } from './src/main/ets/modelscope/ModelScopeConfig';
 export { ModelScopeDirectClient } from './src/main/ets/modelscope/ModelScopeDirectClient';
@@ -32,3 +33,16 @@ export { callToolGateway, configureLocalProviderConfig, configureLocalProviderCo
 export { GMAIL_MCP_AUTH_SETUP_URL, GMAIL_WEB_URL, GOOGLE_CALENDAR_WEB_URL, GOOGLE_OAUTH_SETUP_URL } from './src/main/ets/aiphone/runtime/GmailToolA2ui';
 export { AssetCredentialStore, CredentialStore, credentialRefFor } from './src/main/ets/aiphone/runtime/DynamicCredentialStore';
 export { GmailOAuthConfig, GmailOAuthRedirectResult, GmailOAuthTokenSet, handleGmailOAuthRedirect } from './src/main/ets/aiphone/runtime/GmailOAuthClient';
+export { AgentSkill } from './src/main/ets/skill/AgentSkill';
+export { parseSkillMarkdown } from './src/main/ets/skill/SkillMarkdownParser';
+export { loadSkillsFromContext } from './src/main/ets/skill/SkillLoader';
+export { buildSkillCatalog } from './src/main/ets/skill/SkillCatalog';
+export { SkillReadTool } from './src/main/ets/skill/SkillReadTool';
+export { ensureBundledSkillsInSandbox, loadSandboxSkills, sandboxSkillsRoot } from './src/main/ets/skill/SkillStore';
+export {
+  SkillSnapshot,
+  createSkillSnapshot,
+  buildSkillsSection,
+  buildReActFormatRules,
+  buildLoopSystemPrompt
+} from './src/main/ets/skill/SkillSnapshot';
