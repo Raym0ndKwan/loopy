@@ -1,5 +1,6 @@
 import http from '@ohos.net.http';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
+import { buildLoopSystemPrompt, SkillSnapshot } from '../skill/SkillSnapshot';
 import { LocalModel } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
 
@@ -23,9 +24,11 @@ interface ChatResponse {
 
 export class OpenAiCompatibleModel implements LocalModel {
   private provider: LlmProvider;
+  private skillSnapshot: SkillSnapshot | null;
 
-  constructor(provider: LlmProvider) {
+  constructor(provider: LlmProvider, skillSnapshot?: SkillSnapshot) {
     this.provider = provider;
+    this.skillSnapshot = skillSnapshot ?? null;
   }
 
   async complete(prompt: string, conversation?: ConversationContext): Promise<string> {
@@ -111,7 +114,7 @@ export class OpenAiCompatibleModel implements LocalModel {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool[input] or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.'
+        content: buildLoopSystemPrompt(this.skillSnapshot)
       }
     ];
 
