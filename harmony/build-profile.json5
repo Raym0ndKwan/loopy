@@ -5,13 +5,13 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.cer",
+          "certpath": "C:\\Users\\HUAWEI\\.ohos\\config\\default_harmony_QFo0-y7AvueXdgtR4ITlg2eO-6dGLv4WNxxXpJDDmk0=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001928E74BC2CC74938961DB8E52A224C54575C1F69BC3A8F845DA0C2490F175A5928409B86E97",
-          "profile": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.p7b",
+          "keyPassword": "0000001A719C3DC89B63F9347A5E3862872FDCDF4D37A50FE47B07E75A8BCDAF9DDA87D183404E7F1C66",
+          "profile": "C:\\Users\\HUAWEI\\.ohos\\config\\default_harmony_QFo0-y7AvueXdgtR4ITlg2eO-6dGLv4WNxxXpJDDmk0=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "/Users/raymondkwan/.ohos/config/default_harmony_E_1KZ4eCVjJVlhTxn29meHPlrUVk4FGRK62FX8rMbCQ=.p12",
-          "storePassword": "00000019CF3FE46311512DD5F7E717646AC418E342B37DED8256FE37B0DFAC22C679BB139E2DCC3129"
+          "storeFile": "C:\\Users\\HUAWEI\\.ohos\\config\\default_harmony_QFo0-y7AvueXdgtR4ITlg2eO-6dGLv4WNxxXpJDDmk0=.p12",
+          "storePassword": "0000001A57CBE0519FDADCAC3BA9D65305E08AA6A5B94DBA5E9EBE1D18F9601AF1C47DBE75C497D60F5F"
         }
       }
     ],
@@ -19,7 +19,7 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "compatibleSdkVersion": "5.0.5(17)",
+        "compatibleSdkVersion": "6.1.0(23)",
         "runtimeOS": "HarmonyOS",
         "targetSdkVersion": "6.1.0(23)",
         "buildOption": {

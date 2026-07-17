@@ -1,15 +1,27 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
+export { Agent, AgentListener } from './src/main/ets/agent/Agent';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
+export {
+  MESSAGE_TYPE_CONTROL_CLEAR,
+  MESSAGE_TYPE_INPUT,
+  MESSAGE_TYPE_OUTPUT,
+  MESSAGE_TYPE_OTHERS
+} from './src/main/ets/agent/AgentMessageTypes';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
+export { LeaderAgent } from './src/main/ets/agent/LeaderAgent';
+export { AgentMessage, BusReader, MessageBus, LinkedMessageBus } from './src/main/ets/agent/MessageBus';
+export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
 export {
   ToolRegistry,
   ToolRegistryCloseHandler,
   createConfiguredLoopToolRegistry,
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
-export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
+export { LOOP_AGENT_IDENTITY_PROMPT } from './src/main/ets/agent/LoopAgentPrompt';
+export { ReActAgent, UiRenderHandler } from './src/main/ets/agent/ReActAgent';
+export { ReActAgentRunner } from './src/main/ets/agent/ReActAgentRunner';
 export { LocalModel } from './src/main/ets/model/LocalModel';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
 export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
