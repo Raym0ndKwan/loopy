@@ -8,11 +8,13 @@ import {
   A2uiEnvelope,
   A2uiFlightData,
   A2uiFoodData,
+  A2uiGenericToolResultData,
   A2uiLabelValueData,
   A2uiSummaryData,
   A2uiSurfaceState,
   A2uiTravelOptionData,
   A2uiTrainData,
+  StripeReceivingAccountCardData,
   defaultA2uiCapabilities,
   emptyA2uiSurface
 } from './A2uiTypes';
@@ -34,7 +36,16 @@ import {
   gmailThreadResultsA2ui
 } from './GmailToolA2ui';
 import { mailDraftPreviewA2ui, mailResultsA2ui, mailResultsFromDynamicA2ui } from './MailToolA2ui';
-import { MailDraftArgs, MailProviderStatus, MailSearchArgs, MailThreadResult } from './MailToolTypes';
+import {
+  MailDetail,
+  MailDetailRequest,
+  MailDraftArgs,
+  MailProviderStatus,
+  MailReplyCommand,
+  MailReplyOperationResult,
+  MailSearchArgs,
+  MailThreadResult
+} from './MailToolTypes';
 import {
   GMAIL_ACCESS_TOKEN_REF,
   GMAIL_DEFAULT_REDIRECT_URI,
@@ -52,20 +63,98 @@ import {
   saveGmailOAuthPending,
   saveGmailOAuthTokenSet
 } from './GmailOAuthClient';
-import { GenericMcpClient } from './GenericMcpClient';
-import { callGmailApiTool } from './GmailApiClient';
-import { callYouTubeVideoSearch } from './YouTubeApiClient';
+import {
+  X_DEFAULT_REDIRECT_URI,
+  X_OAUTH_ACCESS_TOKEN_REF,
+  XOAuthConfig,
+  buildXOAuthAuthorizationUrl,
+  createXOAuthPending,
+  isXAccessTokenFresh,
+  loadXOAuthTokenSet,
+  refreshXOAuthAccessToken,
+  saveXOAuthPending,
+  saveXOAuthTokenSet
+} from './XOAuthClient';
+import { buildInitializeRequest, buildToolsCallRequest, GenericMcpClient } from './GenericMcpClient';
+import { callGmailApiTool, gmailMailDetailFromPayload, readGmailMailDetail } from './GmailApiClient';
+import { callYouTubeVideoSearch, defaultYouTubeSearchOptions, YouTubeSearchOptions } from './YouTubeApiClient';
 import { callMediaVideoSearch, mediaVideoQueryFromArgs } from './MediaVideoClient';
-import { callCalendarTool } from './CalendarApiClient';
-import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult } from './MapsApiClient';
+import {
+  CalendarEventArgs,
+  calendarEventRequiredFields,
+  calendarDeleteTargetFromResultsForTest,
+  calendarUpdateArgsFromResultsForTest,
+  calendarMissingArgsResult,
+  calendarProviderDateTime,
+  calendarResultsFromComposioObservation,
+  normalizedCalendarArgsForPrompt
+} from './CalendarApiClient';
+import { callMapsPlaceDetails, callMapsPlaceSearch, mapsFoodRecordFromResult, mapsRouteResult } from './MapsApiClient';
 import { QqMailConfig, QqMailImapClient } from './QqMailImapClient';
+import { socialHubDraftA2ui, socialHubFeedA2ui } from './SocialHubA2ui';
+import { SocialHubClient, SocialHubFeedResult, SocialHubProviderConfig } from './SocialHubClient';
+import { SocialHubConnectionData, SocialHubDraftData, SocialHubItemData, SocialHubPlatform } from './SocialHubTypes';
+import {
+  callComposioDynamic,
+  callComposioFixedRaw,
+  composioDynamicResultFromObservation,
+  composioPhoneNumberIdsFromObservation,
+  ComposioRawExecution,
+  refreshComposioConnections
+} from './ComposioDynamicBackend';
+import { aggregateSearchA2ui } from './AggregateSearchA2ui';
+import { callAggregateSearch } from './AggregateSearchClient';
 import { discoverDynamicToolForPrompt, DynamicToolDiscoveryResult } from './DynamicToolDiscovery';
 import { DynamicToolRegistry, isBuiltInToolId, isUnsafeMcpTool, selectBestRemoteTransport } from './DynamicToolRegistry';
 import { sampleManifestForToolId } from './DynamicToolSamples';
-import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isMailToolId, isMapsToolId, isMediaToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import { isCalendarToolId, isGmailToolId, isKnownDomainToolId, isLuckinToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId } from './ToolDefinitionRegistry';
+import {
+  PaymentAccount,
+  PaymentMode,
+  PaymentPolicy,
+  PaymentFundingSource,
+  PaymentProvider,
+  PaymentRequestDraft,
+  PaymentValidationResult,
+  PaymentValidationStatus,
+  defaultPaymentAccountBook,
+  isStripePaymentLinkUrl,
+  paymentIdempotencyKey,
+  validatePaymentRequest
+} from '../payment/PaymentCore';
+import { paymentCancelledA2ui, paymentValidationA2ui } from '../payment/PaymentA2ui';
+import {
+  PayPalEnvironment,
+  buildPayPalCaptureRequest,
+  buildPayPalOrderRequest,
+  buildPayPalTokenRequest,
+  paypalApprovalUrlFromOrder
+} from '../payment/PayPalPaymentClient';
+import {
+  buildStripeCheckoutSessionRequest,
+  stripeCheckoutUrlFromResponse
+} from '../payment/StripePaymentClient';
+import { stripeReceivingAccountA2ui } from '../payment/StripeReceivingAccountA2ui';
+import {
+  blankStripeReceivingProfile,
+  mapStripeReceivingStatus,
+  StripeReceivingAccountStatus,
+  StripeReceivingAccountStatusPayload,
+  StripeReceivingProfile,
+  validateStripeReceivingProfile
+} from '../payment/StripeReceivingAccountCore';
+import {
+  createStripeConnectAccount,
+  createStripeConnectOnboardingLink,
+  fetchStripeConnectStatus,
+  StripeConnectAccountResult,
+  StripeConnectOnboardingLinkResult,
+  StripeConnectStatusResult
+} from '../payment/StripeConnectClient';
 import {
   DynamicCredentialSpec,
   DynamicGenericToolResult,
+  DynamicMcpTool,
   DynamicToolManifest,
   DynamicToolRegistration,
   DynamicToolTransport
@@ -102,6 +191,11 @@ interface HttpTextResponse {
   headers: string;
 }
 
+interface ComposioFixedRequestPayload {
+  fixedToolId: string;
+  fixedArgs?: Object;
+}
+
 interface HttpRequestHeaders {
   'User-Agent'?: string;
   'Accept'?: string;
@@ -110,6 +204,7 @@ interface HttpRequestHeaders {
   'Cookie'?: string;
   'Content-Type'?: string;
   'Authorization'?: string;
+  'Idempotency-Key'?: string;
   'MCP-Protocol-Version'?: string;
   'Mcp-Session-Id'?: string;
   'X-VARIFLIGHT-KEY'?: string;
@@ -149,6 +244,13 @@ interface StationDefault {
 }
 
 interface LocalProviderConfig {
+  toolGatewayApiKey: string;
+  xBearerToken: string;
+  xUsername: string;
+  xOauthClientId: string;
+  xOauthRedirectUri: string;
+  slackUserToken: string;
+  slackBotToken: string;
   flightMcpKey: string;
   variflightApiUrl: string;
   amapKey: string;
@@ -169,6 +271,12 @@ interface LocalProviderConfig {
   mcdMcpUrl: string;
   luckinMcpToken: string;
   luckinMcpUrl: string;
+  didiMcpKey: string;
+  didiMcpUrl: string;
+  didiMcpSandbox: string;
+  amapMcpKey: string;
+  amapMcpUrl: string;
+  rideMockEnabled: string;
   googleMapsApiKey: string;
   googleOauthClientId: string;
   googleOauthClientSecret: string;
@@ -179,14 +287,43 @@ interface LocalProviderConfig {
   gmailOauthRedirectUri: string;
   gmailMcpUserProject: string;
   youtubeApiKey: string;
+  zhihuApiKey: string;
   qqMailAddress: string;
   qqMailAuthCode: string;
   qqMailImapHost: string;
   qqMailImapPort: string;
   qqMailDraftsMailbox: string;
+  paypalClientId: string;
+  paypalClientSecret: string;
+  paypalEnvironment: string;
+  paypalReturnUrl: string;
+  paypalCancelUrl: string;
+  paypalCheckoutGatewayUrl: string;
+  stripeSecretKey: string;
+  stripePublishableKey: string;
+  stripeSuccessUrl: string;
+  stripeCancelUrl: string;
+  stripeCheckoutGatewayUrl: string;
+  stripeConnectReturnUrl: string;
+  stripeConnectRefreshUrl: string;
+  stripeReceivingAgentJson: string;
+  paymentAccountBookJson: string;
+  paymentDefaultCurrency: string;
+  paymentMode: string;
+  paymentLiveAllowedStripeAccountIds: string;
+  paymentLiveMaxAmountMinor: string;
 }
 
 interface LocalProviderRawConfig {
+  TOOL_GATEWAY_API_KEY?: string;
+  X_BEARER_TOKEN?: string;
+  X_ACCESS_TOKEN?: string;
+  X_OAUTH_TOKEN?: string;
+  X_USERNAME?: string;
+  X_OAUTH_CLIENT_ID?: string;
+  X_OAUTH_REDIRECT_URI?: string;
+  SLACK_USER_TOKEN?: string;
+  SLACK_BOT_TOKEN?: string;
   FLIGHT_MCP_KEY?: string;
   VARIFLIGHT_API_KEY?: string;
   X_VARIFLIGHT_KEY?: string;
@@ -212,6 +349,12 @@ interface LocalProviderRawConfig {
   MCD_MCP_URL?: string;
   LUCKIN_MCP_TOKEN?: string;
   LUCKIN_MCP_URL?: string;
+  DIDI_MCP_KEY?: string;
+  DIDI_MCP_URL?: string;
+  DIDI_MCP_SANDBOX?: string;
+  AMAP_MCP_KEY?: string;
+  AMAP_MCP_URL?: string;
+  RIDE_MOCK_ENABLED?: string;
   GOOGLE_MAPS_API_KEY?: string;
   GMAIL_AUTH_URL?: string;
   GMAIL_OAUTH_CLIENT_ID?: string;
@@ -223,11 +366,33 @@ interface LocalProviderRawConfig {
   GMAIL_MCP_USER_PROJECT?: string;
   GOOGLE_CLOUD_PROJECT?: string;
   YOUTUBE_API_KEY?: string;
+  ZHIHU_API_KEY?: string;
   QQ_MAIL_ADDRESS?: string;
   QQ_MAIL_AUTH_CODE?: string;
   QQ_MAIL_IMAP_HOST?: string;
   QQ_MAIL_IMAP_PORT?: string;
   QQ_MAIL_DRAFTS_MAILBOX?: string;
+  PAYPAL_CLIENT_ID?: string;
+  PAYPAL_CLIENT_SECRET?: string;
+  PAYPAL_ENVIRONMENT?: string;
+  PAYPAL_RETURN_URL?: string;
+  PAYPAL_CANCEL_URL?: string;
+  PAYPAL_CHECKOUT_GATEWAY_URL?: string;
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_PUBLISHABLE_KEY?: string;
+  STRIPE_SUCCESS_URL?: string;
+  STRIPE_CANCEL_URL?: string;
+  STRIPE_CHECKOUT_GATEWAY_URL?: string;
+  STRIPE_TEST_SECRET_KEY?: string;
+  STRIPE_LIVE_SECRET_KEY?: string;
+  STRIPE_CONNECT_RETURN_URL?: string;
+  STRIPE_CONNECT_REFRESH_URL?: string;
+  STRIPE_RECEIVING_AGENT_JSON?: string;
+  PAYMENT_ACCOUNT_BOOK_JSON?: string;
+  PAYMENT_DEFAULT_CURRENCY?: string;
+  PAYMENT_MODE?: string;
+  PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS?: string;
+  PAYMENT_LIVE_MAX_AMOUNT_MINOR?: string;
   flightMcpKey?: string;
   variflightApiUrl?: string;
   amapKey?: string;
@@ -248,6 +413,12 @@ interface LocalProviderRawConfig {
   mcdMcpUrl?: string;
   luckinMcpToken?: string;
   luckinMcpUrl?: string;
+  didiMcpKey?: string;
+  didiMcpUrl?: string;
+  didiMcpSandbox?: string;
+  amapMcpKey?: string;
+  amapMcpUrl?: string;
+  rideMockEnabled?: string;
   googleMapsApiKey?: string;
   googleOauthClientId?: string;
   googleOauthClientSecret?: string;
@@ -258,11 +429,38 @@ interface LocalProviderRawConfig {
   gmailOauthRedirectUri?: string;
   gmailMcpUserProject?: string;
   youtubeApiKey?: string;
+  zhihuApiKey?: string;
   qqMailAddress?: string;
   qqMailAuthCode?: string;
   qqMailImapHost?: string;
   qqMailImapPort?: string;
   qqMailDraftsMailbox?: string;
+  paypalClientId?: string;
+  paypalClientSecret?: string;
+  paypalEnvironment?: string;
+  paypalReturnUrl?: string;
+  paypalCancelUrl?: string;
+  paypalCheckoutGatewayUrl?: string;
+  stripeSecretKey?: string;
+  stripePublishableKey?: string;
+  stripeSuccessUrl?: string;
+  stripeCancelUrl?: string;
+  stripeCheckoutGatewayUrl?: string;
+  stripeConnectReturnUrl?: string;
+  stripeConnectRefreshUrl?: string;
+  stripeReceivingAgentJson?: string;
+  paymentAccountBookJson?: string;
+  paymentDefaultCurrency?: string;
+  paymentMode?: string;
+  paymentLiveAllowedStripeAccountIds?: string;
+  paymentLiveMaxAmountMinor?: string;
+  toolGatewayApiKey?: string;
+  xBearerToken?: string;
+  xUsername?: string;
+  xOauthClientId?: string;
+  xOauthRedirectUri?: string;
+  slackUserToken?: string;
+  slackBotToken?: string;
 }
 
 interface VariFlightRequestParams {
@@ -372,12 +570,20 @@ interface AmapPoi {
   address?: string;
   distance?: string;
   location?: string;
+  pname?: string;
+  cityname?: string;
+  adname?: string;
 }
 
 interface AmapGeocode {
   location?: string;
   formatted_address?: string;
   level?: string;
+  province?: Object | string;
+  city?: Object | string;
+  district?: Object | string;
+  citycode?: Object | string;
+  adcode?: Object | string;
 }
 
 interface AmapPayload {
@@ -616,41 +822,9 @@ interface McpContentItem {
   data?: Object | string | number | boolean;
 }
 
-class EmptyMcpCapabilities {}
-
-interface McpInitializeClientInfo {
-  name: string;
-  version: string;
-}
-
-interface McpInitializeParams {
-  protocolVersion: string;
-  capabilities: EmptyMcpCapabilities;
-  clientInfo: McpInitializeClientInfo;
-}
-
-interface McpInitializeRequest {
-  jsonrpc: string;
-  id: number;
-  method: string;
-  params: McpInitializeParams;
-}
-
 interface McpInitializedNotification {
   jsonrpc: string;
   method: string;
-}
-
-interface McpToolCallParams {
-  name: string;
-  arguments: Object;
-}
-
-interface McpToolCallRequest {
-  jsonrpc: string;
-  id: number;
-  method: string;
-  params: McpToolCallParams;
 }
 
 interface McDonaldsNearbyStoresArgs {
@@ -676,6 +850,44 @@ interface LuckinShopListArgs {
 interface LuckinProductSearchArgs {
   deptId: number;
   query: string;
+}
+
+interface LuckinProductDetailArgs {
+  deptId: number;
+  productId: number;
+}
+
+interface LuckinSwitchProductArgs {
+  deptId: number;
+  productId: number;
+  skuCode: string;
+  attrOperationParam: LuckinAttrOperationParam;
+  amount: number;
+}
+
+interface LuckinAttrOperationParam {
+  attributeId: number;
+  subAttr: LuckinSubAttrOperation;
+}
+
+interface LuckinSubAttrOperation {
+  attributeId: number;
+  operation: number;
+}
+
+interface LuckinOrderProductArgs {
+  productId: number;
+  skuCode: string;
+  amount: number;
+}
+
+interface LuckinOrderRequestArgs {
+  deptId: number;
+  productList: LuckinOrderProductArgs[];
+  longitude: number;
+  latitude: number;
+  couponCodeList?: string[];
+  remark?: string;
 }
 
 type McDonaldsMcpData =
@@ -804,14 +1016,24 @@ interface LuckinPayload {
 interface LuckinShopRecord {
   deptId?: string | number;
   deptName?: string;
+  shopName?: string;
+  storeName?: string;
   name?: string;
+  title?: string;
   address?: string;
+  deptAddress?: string;
+  shopAddress?: string;
   deptTags?: string[];
   tags?: string[];
   longitude?: string | number;
   latitude?: string | number;
+  lng?: string | number;
+  lat?: string | number;
+  distanceDesc?: string | number;
   workTimeStart?: string;
   workTimeEnd?: string;
+  workTime?: string;
+  businessTime?: string;
   distance?: string | number;
   number?: string;
 }
@@ -830,6 +1052,7 @@ interface LuckinProductRecord {
   productName?: string;
   name?: string;
   skuCode?: string;
+  pictureUrl?: string;
   price?: string | number;
   discountPrice?: string | number;
   initPrice?: string | number;
@@ -847,22 +1070,63 @@ interface LuckinProductContainer {
 }
 
 interface LuckinProductAttr {
+  attributeId?: number;
   attributeName?: string;
   productSubAttrs?: LuckinProductSubAttr[];
 }
 
 interface LuckinProductSubAttr {
+  attributeId?: number;
   attributeName?: string;
   selected?: boolean | null;
+  canSelected?: number | null;
+  price?: number | null;
 }
 
 interface LuckinOrderRecord {
   orderId?: string | number;
+  orderIdStr?: string;
   orderStatusName?: string;
   orderStatus?: string | number;
+  aboutTime?: string | number;
+  takeMealTime?: string;
   shopInfo?: LuckinShopRecord;
   productInfoList?: LuckinProductRecord[];
+  productList?: LuckinProductRecord[];
+  orderCommodityList?: LuckinProductRecord[];
   orderPayAmount?: string | number;
+  totalInitialPrice?: string | number;
+  privilegeMoney?: string | number;
+  discountPrice?: string | number;
+  couponCodeList?: string[];
+  payOrderUrl?: string;
+  payOrderQrCodeUrl?: string;
+  needPay?: boolean | string;
+  tradeNo?: string | number;
+}
+
+interface LuckinOrderRecordAliases extends LuckinOrderRecord {
+  order_id?: string | number;
+  order_id_str?: string;
+  order_no?: string | number;
+  orderNo?: string | number;
+  pay_order_url?: string;
+  payUrl?: string;
+  pay_url?: string;
+  wechatPayUrl?: string;
+  wechat_pay_url?: string;
+  pay_order_qr_code_url?: string;
+  qrCodeUrl?: string;
+  qr_code_url?: string;
+  trade_no?: string | number;
+}
+
+interface LuckinPayloadBag extends LuckinPayload {
+  orderInfo?: LuckinOrderRecord;
+  order?: LuckinOrderRecord;
+  orderDetail?: LuckinOrderRecord;
+  orderData?: LuckinOrderRecord;
+  content?: LuckinOrderRecord;
 }
 
 interface FoodParamPair {
@@ -890,6 +1154,7 @@ interface AmapLocationResolution {
   location: string;
   locationSource: string;
   locationLabel: string;
+  city: string;
 }
 
 interface FoodQuery {
@@ -916,6 +1181,9 @@ const DEFAULT_MEITUAN_UNION_API_URL: string = 'https://media.meituan.com/cps_ope
 const DEFAULT_TAOBAO_API_URL: string = 'https://eco.taobao.com/router/rest';
 const DEFAULT_MCD_MCP_URL: string = 'https://mcp.mcd.cn';
 const DEFAULT_LUCKIN_MCP_URL: string = 'https://gwmcp.lkcoffee.com/order/user/mcp';
+const DEFAULT_DIDI_MCP_URL: string = 'https://mcp.didichuxing.com/mcp-servers';
+const DEFAULT_DIDI_MCP_SANDBOX_URL: string = 'https://mcp.didichuxing.com/mcp-servers-sandbox';
+const DEFAULT_AMAP_MCP_URL: string = 'https://mcp.amap.com/mcp';
 const MCP_PROTOCOL_VERSION: string = '2025-06-18';
 const FOOD_PROVIDER_RESULT_LIMIT: number = 10;
 const FOOD_AGGREGATED_RESULT_LIMIT: number = 24;
@@ -967,6 +1235,13 @@ const CHINA_FLIGHT_CITY_CODES: FlightCityCode[] = [
 
 let stationCache: StationCache | null = null;
 let localProviderConfig: LocalProviderConfig = {
+  toolGatewayApiKey: '',
+  xBearerToken: '',
+  xUsername: '',
+  xOauthClientId: '',
+  xOauthRedirectUri: X_DEFAULT_REDIRECT_URI,
+  slackUserToken: '',
+  slackBotToken: '',
   flightMcpKey: '',
   variflightApiUrl: DEFAULT_VARIFLIGHT_API_URL,
   amapKey: '',
@@ -987,6 +1262,12 @@ let localProviderConfig: LocalProviderConfig = {
   mcdMcpUrl: DEFAULT_MCD_MCP_URL,
   luckinMcpToken: '',
   luckinMcpUrl: DEFAULT_LUCKIN_MCP_URL,
+  didiMcpKey: '',
+  didiMcpUrl: DEFAULT_DIDI_MCP_SANDBOX_URL,
+  didiMcpSandbox: 'true',
+  amapMcpKey: '',
+  amapMcpUrl: DEFAULT_AMAP_MCP_URL,
+  rideMockEnabled: 'false',
   googleMapsApiKey: '',
   googleOauthClientId: '',
   googleOauthClientSecret: '',
@@ -997,11 +1278,31 @@ let localProviderConfig: LocalProviderConfig = {
   gmailOauthRedirectUri: '',
   gmailMcpUserProject: '',
   youtubeApiKey: '',
+  zhihuApiKey: '',
   qqMailAddress: '',
   qqMailAuthCode: '',
   qqMailImapHost: 'imap.qq.com',
   qqMailImapPort: '993',
-  qqMailDraftsMailbox: ''
+  qqMailDraftsMailbox: '',
+  paypalClientId: '',
+  paypalClientSecret: '',
+  paypalEnvironment: 'sandbox',
+  paypalReturnUrl: 'aiphone://payment/paypal/success',
+  paypalCancelUrl: 'aiphone://payment/paypal/cancel',
+  paypalCheckoutGatewayUrl: '',
+  stripeSecretKey: '',
+  stripePublishableKey: '',
+  stripeSuccessUrl: 'aiphone://payment/stripe/success',
+  stripeCancelUrl: 'aiphone://payment/stripe/cancel',
+  stripeCheckoutGatewayUrl: '',
+  stripeConnectReturnUrl: 'https://example.com/aiphone/stripe_connect_return',
+  stripeConnectRefreshUrl: 'https://example.com/aiphone/stripe_connect_refresh',
+  stripeReceivingAgentJson: '',
+  paymentAccountBookJson: '',
+  paymentDefaultCurrency: 'USD',
+  paymentMode: 'test',
+  paymentLiveAllowedStripeAccountIds: '',
+  paymentLiveMaxAmountMinor: '100'
 };
 
 export interface LocalToolDebugConfig {
@@ -1024,6 +1325,232 @@ interface MapsToolArgs {
   keyword?: string;
   placeId?: string;
   id?: string;
+}
+
+interface WhatsAppSendArgs {
+  toNumber?: ToolArgValue;
+  text?: ToolArgValue;
+  phoneNumberId?: ToolArgValue;
+  wabaId?: ToolArgValue;
+  previewUrl?: ToolArgValue;
+  confirmed?: ToolArgValue;
+}
+
+interface WhatsAppProviderArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  previewUrl: boolean;
+}
+
+interface WhatsAppConfirmArgs {
+  toNumber: string;
+  text: string;
+  phoneNumberId: string;
+  wabaId: string;
+  previewUrl: boolean;
+  confirmed: boolean;
+}
+
+interface WhatsAppPhoneNumbersArgs {
+  wabaId?: string;
+}
+
+interface CalendarComposioArgs extends CalendarEventArgs {
+  confirmed?: boolean;
+  sendUpdates?: string;
+}
+
+interface CalendarDeleteConfirmArgs {
+  eventId: string;
+  calendarId: string;
+  title: string;
+  start: string;
+  end: string;
+  confirmed: boolean;
+}
+
+type ToolArgValue = Object | string | number | boolean | null | undefined;
+type ToolArgRecord = Record<string, ToolArgValue>;
+type PaymentToolArgValue = ToolArgValue;
+type PaymentToolArgRecord = ToolArgRecord;
+
+interface RideRouteArgs {
+  origin?: ToolArgValue;
+  from?: ToolArgValue;
+  start?: ToolArgValue;
+  destination?: ToolArgValue;
+  to?: ToolArgValue;
+  end?: ToolArgValue;
+  city?: ToolArgValue;
+}
+
+interface RideOrderArgs {
+  productCategory?: ToolArgValue;
+  product_category?: ToolArgValue;
+  estimateTraceId?: ToolArgValue;
+  estimate_trace_id?: ToolArgValue;
+  traceId?: ToolArgValue;
+  confirmed?: ToolArgValue;
+  confirmation?: ToolArgValue;
+  orderId?: ToolArgValue;
+  order_id?: ToolArgValue;
+  reason?: ToolArgValue;
+}
+
+interface RideDidiRequestArgs {
+  from_lng: string;
+  from_lat: string;
+  to_lng: string;
+  to_lat: string;
+  from_name?: string;
+  to_name?: string;
+}
+
+interface RideDidiTextSearchArgs {
+  keywords: string;
+  city: string;
+}
+
+interface RideDidiCreateOrderArgs {
+  product_category: string;
+  estimate_trace_id: string;
+}
+
+interface RideDidiCancelOrderArgs {
+  order_id: string;
+  reason?: string;
+}
+
+interface RideDidiDriverLocationArgs {
+  order_id: string;
+}
+
+interface RideAmapAppLinkArgs {
+  slon: string;
+  slat: string;
+  sname: string;
+  dlon: string;
+  dlat: string;
+  dname: string;
+}
+
+interface RideLinkPreview {
+  didiLink: number;
+  amapLink: number;
+}
+
+interface RideOrderActionArgs {
+  productCategory?: string;
+  product_category?: string;
+  productName?: string;
+  priceText?: string;
+  routeText?: string;
+  origin?: string;
+  destination?: string;
+  pickupLocation?: string;
+  originLocation?: string;
+  destinationLocation?: string;
+  estimateCacheJson?: string;
+  estimateTraceId?: string;
+  estimate_trace_id?: string;
+  traceId?: string;
+  confirmed?: boolean;
+  confirmation?: string;
+  orderId?: string;
+  order_id?: string;
+  reason?: string;
+}
+
+interface RideOrderRouteContext {
+  routeText: string;
+  pickupLocation: string;
+  destinationLocation: string;
+  selectedVehicleText: string;
+  estimateCacheJson: string;
+}
+
+interface RideEstimateCacheProductRecord {
+  productName: string;
+  productCategory: string;
+  priceText: string;
+}
+
+interface RideEstimateCachePayload {
+  traceId: string;
+  products: RideEstimateCacheProductRecord[];
+}
+
+interface RideMockEstimateContent {
+  items: RideEstimateCacheProductRecord[];
+  traceId: string;
+}
+
+interface RideMockEstimatePayload {
+  structuredContent: RideMockEstimateContent;
+}
+
+interface RideMockOrderPayload {
+  orderId: string;
+  status: string;
+}
+
+interface RideMockDriverPayload {
+  location: string;
+  driverName: string;
+  eta: string;
+  status: string;
+}
+
+interface RideMockCancelPayload {
+  status: string;
+}
+
+const RIDE_ORDER_CREATE_DEDUP_MS: number = 120000;
+let lastRideOrderCreateKey: string = '';
+let lastRideOrderCreateAtMs: number = 0;
+
+interface PaymentToolActionArgs {
+  recipient?: PaymentToolArgValue;
+  provider?: PaymentToolArgValue;
+  fundingSource?: PaymentToolArgValue;
+  amountText?: PaymentToolArgValue;
+  currency?: PaymentToolArgValue;
+  note?: PaymentToolArgValue;
+  phase?: PaymentToolArgValue;
+  accountId?: PaymentToolArgValue;
+  targetType?: PaymentToolArgValue;
+  checkoutUrl?: PaymentToolArgValue;
+  providerSessionId?: PaymentToolArgValue;
+  originalQuery?: PaymentToolArgValue;
+}
+
+interface PaymentAccountRaw {
+  id?: PaymentToolArgValue;
+  displayName?: PaymentToolArgValue;
+  aliases?: string[];
+  email?: PaymentToolArgValue;
+  paypalEmail?: PaymentToolArgValue;
+  paypalMerchantId?: PaymentToolArgValue;
+  stripeAccountId?: PaymentToolArgValue;
+  stripePaymentLinkUrl?: PaymentToolArgValue;
+  enabled?: PaymentToolArgValue;
+}
+
+interface PayPalTokenResponsePayload {
+  access_token?: string;
+}
+
+interface PayPalAccessTokenResult {
+  accessToken: string;
+  error: string;
+}
+
+interface StripeCheckoutGatewayPayload {
+  ok?: boolean;
+  checkoutUrl?: string;
+  providerSessionId?: string;
+  error?: string;
 }
 
 function userAgentHeaders(): HttpRequestHeaders {
@@ -1063,6 +1590,10 @@ function applyEnvelopes(store: A2uiSurfaceStore, envelopes: A2uiEnvelope[]): str
 
 export function defaultToolGatewayUrl(): string {
   return LOCAL_TOOL_GATEWAY_URL;
+}
+
+export function currentToolGatewayApiKey(): string {
+  return localProviderConfig.toolGatewayApiKey;
 }
 
 export function isLocalToolGatewayUrl(baseUrl: string): boolean {
@@ -1118,6 +1649,13 @@ function firstText(values: Array<Object | string | number | boolean | null | und
 
 export function configureLocalProviderConfig(config: LocalProviderConfig): void {
   localProviderConfig = {
+    toolGatewayApiKey: config.toolGatewayApiKey.trim(),
+    xBearerToken: config.xBearerToken.trim(),
+    xUsername: config.xUsername.trim().replace('@', ''),
+    xOauthClientId: config.xOauthClientId.trim(),
+    xOauthRedirectUri: config.xOauthRedirectUri.trim().length > 0 ? config.xOauthRedirectUri.trim() : X_DEFAULT_REDIRECT_URI,
+    slackUserToken: config.slackUserToken.trim(),
+    slackBotToken: config.slackBotToken.trim(),
     flightMcpKey: config.flightMcpKey.trim(),
     variflightApiUrl: config.variflightApiUrl.trim().length > 0 ? config.variflightApiUrl.trim() : DEFAULT_VARIFLIGHT_API_URL,
     amapKey: config.amapKey.trim(),
@@ -1138,6 +1676,13 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     mcdMcpUrl: config.mcdMcpUrl.trim().length > 0 ? config.mcdMcpUrl.trim() : DEFAULT_MCD_MCP_URL,
     luckinMcpToken: config.luckinMcpToken.trim(),
     luckinMcpUrl: config.luckinMcpUrl.trim().length > 0 ? config.luckinMcpUrl.trim() : DEFAULT_LUCKIN_MCP_URL,
+    didiMcpKey: config.didiMcpKey.trim(),
+    didiMcpUrl: config.didiMcpUrl.trim().length > 0 ? config.didiMcpUrl.trim() :
+      (config.didiMcpSandbox.trim().toLowerCase() === 'false' ? DEFAULT_DIDI_MCP_URL : DEFAULT_DIDI_MCP_SANDBOX_URL),
+    didiMcpSandbox: config.didiMcpSandbox.trim().toLowerCase() === 'false' ? 'false' : 'true',
+    amapMcpKey: config.amapMcpKey.trim().length > 0 ? config.amapMcpKey.trim() : config.amapKey.trim(),
+    amapMcpUrl: config.amapMcpUrl.trim().length > 0 ? config.amapMcpUrl.trim() : DEFAULT_AMAP_MCP_URL,
+    rideMockEnabled: config.rideMockEnabled.trim().toLowerCase() === 'true' ? 'true' : 'false',
     googleMapsApiKey: config.googleMapsApiKey.trim(),
     googleOauthClientId: config.googleOauthClientId.trim(),
     googleOauthClientSecret: config.googleOauthClientSecret.trim(),
@@ -1148,13 +1693,39 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     gmailOauthRedirectUri: config.gmailOauthRedirectUri.trim().length > 0 ? config.gmailOauthRedirectUri.trim() : GMAIL_DEFAULT_REDIRECT_URI,
     gmailMcpUserProject: config.gmailMcpUserProject.trim(),
     youtubeApiKey: config.youtubeApiKey.trim(),
+    zhihuApiKey: config.zhihuApiKey.trim(),
     qqMailAddress: config.qqMailAddress.trim(),
     qqMailAuthCode: config.qqMailAuthCode.trim(),
     qqMailImapHost: config.qqMailImapHost.trim().length > 0 ? config.qqMailImapHost.trim() : 'imap.qq.com',
     qqMailImapPort: config.qqMailImapPort.trim().length > 0 ? config.qqMailImapPort.trim() : '993',
-    qqMailDraftsMailbox: config.qqMailDraftsMailbox.trim()
+    qqMailDraftsMailbox: config.qqMailDraftsMailbox.trim(),
+    paypalClientId: config.paypalClientId.trim(),
+    paypalClientSecret: config.paypalClientSecret.trim(),
+    paypalEnvironment: config.paypalEnvironment.trim().toLowerCase() === 'live' ? 'live' : 'sandbox',
+    paypalReturnUrl: config.paypalReturnUrl.trim().length > 0 ? config.paypalReturnUrl.trim() : 'aiphone://payment/paypal/success',
+    paypalCancelUrl: config.paypalCancelUrl.trim().length > 0 ? config.paypalCancelUrl.trim() : 'aiphone://payment/paypal/cancel',
+    paypalCheckoutGatewayUrl: config.paypalCheckoutGatewayUrl.trim(),
+    stripeSecretKey: config.stripeSecretKey.trim(),
+    stripePublishableKey: config.stripePublishableKey.trim(),
+    stripeSuccessUrl: config.stripeSuccessUrl.trim().length > 0 ? config.stripeSuccessUrl.trim() : 'aiphone://payment/stripe/success',
+    stripeCancelUrl: config.stripeCancelUrl.trim().length > 0 ? config.stripeCancelUrl.trim() : 'aiphone://payment/stripe/cancel',
+    stripeCheckoutGatewayUrl: config.stripeCheckoutGatewayUrl.trim(),
+    stripeConnectReturnUrl: config.stripeConnectReturnUrl.trim().length > 0 ? config.stripeConnectReturnUrl.trim() : 'https://example.com/aiphone/stripe_connect_return',
+    stripeConnectRefreshUrl: config.stripeConnectRefreshUrl.trim().length > 0 ? config.stripeConnectRefreshUrl.trim() : 'https://example.com/aiphone/stripe_connect_refresh',
+    stripeReceivingAgentJson: config.stripeReceivingAgentJson.trim(),
+    paymentAccountBookJson: config.paymentAccountBookJson.trim(),
+    paymentDefaultCurrency: config.paymentDefaultCurrency.trim().length > 0 ? config.paymentDefaultCurrency.trim().toUpperCase() : 'USD',
+    paymentMode: config.paymentMode.trim().toLowerCase() === 'live' ? 'live' : 'test',
+    paymentLiveAllowedStripeAccountIds: config.paymentLiveAllowedStripeAccountIds.trim(),
+    paymentLiveMaxAmountMinor: config.paymentLiveMaxAmountMinor.trim().length > 0 ? config.paymentLiveMaxAmountMinor.trim() : '100'
   };
   aiLogInfo('[AIPhone][LocalProviderConfig] rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
+    ' toolGatewayApiKeyChars=' + localProviderConfig.toolGatewayApiKey.length.toString() +
+    ' xBearerTokenChars=' + localProviderConfig.xBearerToken.length.toString() +
+    ' xUsernamePresent=' + (localProviderConfig.xUsername.length > 0 ? 'true' : 'false') +
+    ' xOauthClientIdChars=' + localProviderConfig.xOauthClientId.length.toString() +
+    ' slackUserTokenChars=' + localProviderConfig.slackUserToken.length.toString() +
+    ' slackBotTokenChars=' + localProviderConfig.slackBotToken.length.toString() +
     ' flightKeyChars=' + localProviderConfig.flightMcpKey.length.toString() +
     ' amapKeyChars=' + localProviderConfig.amapKey.length.toString() +
     ' tencentMapKeyChars=' + localProviderConfig.tencentMapKey.length.toString() +
@@ -1164,20 +1735,60 @@ export function configureLocalProviderConfig(config: LocalProviderConfig): void 
     ' taobaoPidChars=' + localProviderConfig.taobaoFlashPid.length.toString() +
     ' mcdMcpTokenChars=' + localProviderConfig.mcdMcpToken.length.toString() +
     ' luckinMcpTokenChars=' + localProviderConfig.luckinMcpToken.length.toString() +
+    ' didiMcpKeyChars=' + localProviderConfig.didiMcpKey.length.toString() +
+    ' didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ' amapMcpKeyChars=' + localProviderConfig.amapMcpKey.length.toString() +
+    ' rideMockEnabled=' + localProviderConfig.rideMockEnabled +
     ' googleMapsApiKeyChars=' + localProviderConfig.googleMapsApiKey.length.toString() +
     ' googleOauthClientIdChars=' + localProviderConfig.googleOauthClientId.length.toString() +
     ' gmailOauthClientIdChars=' + localProviderConfig.gmailOauthClientId.length.toString() +
     ' gmailOauthClientSecretChars=' + localProviderConfig.gmailOauthClientSecret.length.toString() +
     ' youtubeApiKeyChars=' + localProviderConfig.youtubeApiKey.length.toString() +
+    ' zhihuApiKeyChars=' + localProviderConfig.zhihuApiKey.length.toString() +
     ' gmailMcpUserProjectPresent=' + (localProviderConfig.gmailMcpUserProject.length > 0 ? 'true' : 'false') +
     ' qqMailAddressPresent=' + (localProviderConfig.qqMailAddress.length > 0 ? 'true' : 'false') +
     ' qqMailAuthCodeChars=' + localProviderConfig.qqMailAuthCode.length.toString() +
+    ' paypalClientIdChars=' + localProviderConfig.paypalClientId.length.toString() +
+    ' paypalClientSecretChars=' + localProviderConfig.paypalClientSecret.length.toString() +
+    ' stripeSecretKeyChars=' + localProviderConfig.stripeSecretKey.length.toString() +
+    ' stripePublishableKeyChars=' + localProviderConfig.stripePublishableKey.length.toString() +
+    ' stripeConnectReturnUrlPresent=' + (localProviderConfig.stripeConnectReturnUrl.length > 0 ? 'true' : 'false') +
+    ' stripeReceivingAgentJsonChars=' + localProviderConfig.stripeReceivingAgentJson.length.toString() +
+    ' paymentAccountBookJsonChars=' + localProviderConfig.paymentAccountBookJson.length.toString() +
     ' defaultLocationPresent=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'true' : 'false'));
+}
+
+export function configureDidiMcpSandboxForRuntime(enabled: boolean): void {
+  localProviderConfig.didiMcpSandbox = enabled ? 'true' : 'false';
+  const currentUrl = localProviderConfig.didiMcpUrl.trim();
+  if (currentUrl.length === 0 ||
+    currentUrl === DEFAULT_DIDI_MCP_URL ||
+    currentUrl === DEFAULT_DIDI_MCP_SANDBOX_URL) {
+    localProviderConfig.didiMcpUrl = enabled ? DEFAULT_DIDI_MCP_SANDBOX_URL : DEFAULT_DIDI_MCP_URL;
+  }
+  aiLogInfo('[AIPhone][DidiMcpSandboxRuntime] didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ' didiMcpUrl=' + (localProviderConfig.didiMcpUrl === DEFAULT_DIDI_MCP_SANDBOX_URL ? 'sandbox' :
+      (localProviderConfig.didiMcpUrl === DEFAULT_DIDI_MCP_URL ? 'production' : 'custom')));
+}
+
+export function rideDidiMcpSandboxEnabledForRuntime(): boolean {
+  return localProviderConfig.didiMcpSandbox === 'true';
 }
 
 export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
   const parsed = JSON.parse(rawJson) as LocalProviderRawConfig;
+  const paymentMode = firstText([parsed.PAYMENT_MODE, parsed.paymentMode]).trim().toLowerCase() === 'live' ? 'live' : 'test';
+  const stripeSecretKey = paymentMode === 'live' ?
+    firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_LIVE_SECRET_KEY, parsed.stripeSecretKey]) :
+    firstText([parsed.STRIPE_SECRET_KEY, parsed.STRIPE_TEST_SECRET_KEY, parsed.stripeSecretKey]);
   configureLocalProviderConfig({
+    toolGatewayApiKey: firstText([parsed.TOOL_GATEWAY_API_KEY, parsed.toolGatewayApiKey]),
+    xBearerToken: firstText([parsed.X_BEARER_TOKEN, parsed.X_ACCESS_TOKEN, parsed.X_OAUTH_TOKEN, parsed.xBearerToken]),
+    xUsername: firstText([parsed.X_USERNAME, parsed.xUsername]),
+    xOauthClientId: firstText([parsed.X_OAUTH_CLIENT_ID, parsed.xOauthClientId]),
+    xOauthRedirectUri: firstText([parsed.X_OAUTH_REDIRECT_URI, parsed.xOauthRedirectUri]),
+    slackUserToken: firstText([parsed.SLACK_USER_TOKEN, parsed.slackUserToken]),
+    slackBotToken: firstText([parsed.SLACK_BOT_TOKEN, parsed.slackBotToken]),
     flightMcpKey: firstText([parsed.FLIGHT_MCP_KEY, parsed.VARIFLIGHT_API_KEY, parsed.X_VARIFLIGHT_KEY, parsed.FLIGHT_API_KEY, parsed.flightMcpKey]),
     variflightApiUrl: firstText([parsed.VARIFLIGHT_API_URL, parsed.FLIGHT_VARIFLIGHT_URL, parsed.variflightApiUrl]),
     amapKey: firstText([parsed.AMAP_KEY, parsed.amapKey]),
@@ -1198,6 +1809,12 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     mcdMcpUrl: firstText([parsed.MCD_MCP_URL, parsed.mcdMcpUrl]),
     luckinMcpToken: firstText([parsed.LUCKIN_MCP_TOKEN, parsed.luckinMcpToken]),
     luckinMcpUrl: firstText([parsed.LUCKIN_MCP_URL, parsed.luckinMcpUrl]),
+    didiMcpKey: firstText([parsed.DIDI_MCP_KEY, parsed.didiMcpKey]),
+    didiMcpUrl: firstText([parsed.DIDI_MCP_URL, parsed.didiMcpUrl]),
+    didiMcpSandbox: firstText([parsed.DIDI_MCP_SANDBOX, parsed.didiMcpSandbox]),
+    amapMcpKey: firstText([parsed.AMAP_MCP_KEY, parsed.amapMcpKey]),
+    amapMcpUrl: firstText([parsed.AMAP_MCP_URL, parsed.amapMcpUrl]),
+    rideMockEnabled: firstText([parsed.RIDE_MOCK_ENABLED, parsed.rideMockEnabled]),
     googleMapsApiKey: firstText([parsed.GOOGLE_MAPS_API_KEY, parsed.googleMapsApiKey]),
     googleOauthClientId: firstText([parsed.GOOGLE_OAUTH_CLIENT_ID, parsed.GMAIL_OAUTH_CLIENT_ID, parsed.googleOauthClientId]),
     googleOauthClientSecret: firstText([parsed.GOOGLE_OAUTH_CLIENT_SECRET, parsed.GMAIL_OAUTH_CLIENT_SECRET, parsed.googleOauthClientSecret]),
@@ -1208,16 +1825,42 @@ export function configureLocalProviderConfigFromRawJson(rawJson: string): void {
     gmailOauthRedirectUri: firstText([parsed.GMAIL_OAUTH_REDIRECT_URI, parsed.GOOGLE_OAUTH_REDIRECT_URI, parsed.gmailOauthRedirectUri]),
     gmailMcpUserProject: firstText([parsed.GMAIL_MCP_USER_PROJECT, parsed.GOOGLE_CLOUD_PROJECT, parsed.gmailMcpUserProject]),
     youtubeApiKey: firstText([parsed.YOUTUBE_API_KEY, parsed.youtubeApiKey]),
+    zhihuApiKey: firstText([parsed.ZHIHU_API_KEY, parsed.zhihuApiKey]),
     qqMailAddress: firstText([parsed.QQ_MAIL_ADDRESS, parsed.qqMailAddress]),
     qqMailAuthCode: firstText([parsed.QQ_MAIL_AUTH_CODE, parsed.qqMailAuthCode]),
     qqMailImapHost: firstText([parsed.QQ_MAIL_IMAP_HOST, parsed.qqMailImapHost]),
     qqMailImapPort: firstText([parsed.QQ_MAIL_IMAP_PORT, parsed.qqMailImapPort]),
-    qqMailDraftsMailbox: firstText([parsed.QQ_MAIL_DRAFTS_MAILBOX, parsed.qqMailDraftsMailbox])
+    qqMailDraftsMailbox: firstText([parsed.QQ_MAIL_DRAFTS_MAILBOX, parsed.qqMailDraftsMailbox]),
+    paypalClientId: firstText([parsed.PAYPAL_CLIENT_ID, parsed.paypalClientId]),
+    paypalClientSecret: firstText([parsed.PAYPAL_CLIENT_SECRET, parsed.paypalClientSecret]),
+    paypalEnvironment: firstText([parsed.PAYPAL_ENVIRONMENT, parsed.paypalEnvironment]),
+    paypalReturnUrl: firstText([parsed.PAYPAL_RETURN_URL, parsed.paypalReturnUrl]),
+    paypalCancelUrl: firstText([parsed.PAYPAL_CANCEL_URL, parsed.paypalCancelUrl]),
+    paypalCheckoutGatewayUrl: firstText([parsed.PAYPAL_CHECKOUT_GATEWAY_URL, parsed.paypalCheckoutGatewayUrl]),
+    stripeSecretKey: stripeSecretKey,
+    stripePublishableKey: firstText([parsed.STRIPE_PUBLISHABLE_KEY, parsed.stripePublishableKey]),
+    stripeSuccessUrl: firstText([parsed.STRIPE_SUCCESS_URL, parsed.stripeSuccessUrl]),
+    stripeCancelUrl: firstText([parsed.STRIPE_CANCEL_URL, parsed.stripeCancelUrl]),
+    stripeCheckoutGatewayUrl: firstText([parsed.STRIPE_CHECKOUT_GATEWAY_URL, parsed.stripeCheckoutGatewayUrl]),
+    stripeConnectReturnUrl: firstText([parsed.STRIPE_CONNECT_RETURN_URL, parsed.stripeConnectReturnUrl]),
+    stripeConnectRefreshUrl: firstText([parsed.STRIPE_CONNECT_REFRESH_URL, parsed.stripeConnectRefreshUrl]),
+    stripeReceivingAgentJson: firstText([parsed.STRIPE_RECEIVING_AGENT_JSON, parsed.stripeReceivingAgentJson]),
+    paymentAccountBookJson: firstText([parsed.PAYMENT_ACCOUNT_BOOK_JSON, parsed.paymentAccountBookJson]),
+    paymentDefaultCurrency: firstText([parsed.PAYMENT_DEFAULT_CURRENCY, parsed.paymentDefaultCurrency]),
+    paymentMode: paymentMode,
+    paymentLiveAllowedStripeAccountIds: firstText([parsed.PAYMENT_LIVE_ALLOWED_STRIPE_ACCOUNT_IDS, parsed.paymentLiveAllowedStripeAccountIds]),
+    paymentLiveMaxAmountMinor: firstText([parsed.PAYMENT_LIVE_MAX_AMOUNT_MINOR, parsed.paymentLiveMaxAmountMinor])
   });
 }
 
 export function localProviderConfigDebugSummary(): string {
   return 'rawfile=' + LOCAL_PROVIDER_CONFIG_RAWFILE +
+    ', toolGatewayApiKey=' + (localProviderConfig.toolGatewayApiKey.length > 0 ? 'present(' + localProviderConfig.toolGatewayApiKey.length.toString() + ')' : 'missing') +
+    ', xBearerToken=' + (localProviderConfig.xBearerToken.length > 0 ? 'present(' + localProviderConfig.xBearerToken.length.toString() + ')' : 'missing') +
+    ', xUsername=' + (localProviderConfig.xUsername.length > 0 ? 'present' : 'missing') +
+    ', xOauthClientId=' + (localProviderConfig.xOauthClientId.length > 0 ? 'present(' + localProviderConfig.xOauthClientId.length.toString() + ')' : 'missing') +
+    ', slackUserToken=' + (localProviderConfig.slackUserToken.length > 0 ? 'present(' + localProviderConfig.slackUserToken.length.toString() + ')' : 'missing') +
+    ', slackBotToken=' + (localProviderConfig.slackBotToken.length > 0 ? 'present(' + localProviderConfig.slackBotToken.length.toString() + ')' : 'missing') +
     ', flightKey=' + (localProviderConfig.flightMcpKey.length > 0 ? 'present(' + localProviderConfig.flightMcpKey.length.toString() + ')' : 'missing') +
     ', amapKey=' + (localProviderConfig.amapKey.length > 0 ? 'present(' + localProviderConfig.amapKey.length.toString() + ')' : 'missing') +
     ', tencentMapKey=' + (localProviderConfig.tencentMapKey.length > 0 ? 'present(' + localProviderConfig.tencentMapKey.length.toString() + ')' : 'missing') +
@@ -1227,17 +1870,59 @@ export function localProviderConfigDebugSummary(): string {
     ', taobaoPid=' + (localProviderConfig.taobaoFlashPid.length > 0 ? 'present(' + localProviderConfig.taobaoFlashPid.length.toString() + ')' : 'missing') +
     ', mcdMcpToken=' + (localProviderConfig.mcdMcpToken.length > 0 ? 'present(' + localProviderConfig.mcdMcpToken.length.toString() + ')' : 'missing') +
     ', luckinMcpToken=' + (localProviderConfig.luckinMcpToken.length > 0 ? 'present(' + localProviderConfig.luckinMcpToken.length.toString() + ')' : 'missing') +
+    ', didiMcpKey=' + (localProviderConfig.didiMcpKey.length > 0 ? 'present(' + localProviderConfig.didiMcpKey.length.toString() + ')' : 'missing') +
+    ', didiMcpUrl=' + (localProviderConfig.didiMcpUrl.length > 0 ? 'present' : 'missing') +
+    ', didiMcpSandbox=' + localProviderConfig.didiMcpSandbox +
+    ', amapMcpKey=' + (localProviderConfig.amapMcpKey.length > 0 ? 'present(' + localProviderConfig.amapMcpKey.length.toString() + ')' : 'missing') +
+    ', amapMcpUrl=' + (localProviderConfig.amapMcpUrl.length > 0 ? 'present' : 'missing') +
+    ', rideMockEnabled=' + localProviderConfig.rideMockEnabled +
     ', googleMapsApiKey=' + (localProviderConfig.googleMapsApiKey.length > 0 ? 'present(' + localProviderConfig.googleMapsApiKey.length.toString() + ')' : 'missing') +
     ', googleOauthClientId=' + (localProviderConfig.googleOauthClientId.length > 0 ? 'present(' + localProviderConfig.googleOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientId=' + (localProviderConfig.gmailOauthClientId.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientId.length.toString() + ')' : 'missing') +
     ', gmailOauthClientSecret=' + (localProviderConfig.gmailOauthClientSecret.length > 0 ? 'present(' + localProviderConfig.gmailOauthClientSecret.length.toString() + ')' : 'missing') +
     ', youtubeApiKey=' + (localProviderConfig.youtubeApiKey.length > 0 ? 'present(' + localProviderConfig.youtubeApiKey.length.toString() + ')' : 'missing') +
+    ', zhihuApiKey=' + (localProviderConfig.zhihuApiKey.length > 0 ? 'present(' + localProviderConfig.zhihuApiKey.length.toString() + ')' : 'missing') +
     ', gmailMcpUserProject=' + (localProviderConfig.gmailMcpUserProject.length > 0 ? 'present' : 'missing') +
     ', qqMailAddress=' + (localProviderConfig.qqMailAddress.length > 0 ? 'present' : 'missing') +
     ', qqMailAuthCode=' + (localProviderConfig.qqMailAuthCode.length > 0 ? 'present(' + localProviderConfig.qqMailAuthCode.length.toString() + ')' : 'missing') +
     ', qqMailImapHost=' + (localProviderConfig.qqMailImapHost.length > 0 ? 'present' : 'missing') +
     ', qqMailDraftsMailbox=' + (localProviderConfig.qqMailDraftsMailbox.length > 0 ? 'present' : 'missing') +
+    ', paypalClientId=' + (localProviderConfig.paypalClientId.length > 0 ? 'present(' + localProviderConfig.paypalClientId.length.toString() + ')' : 'missing') +
+    ', paypalClientSecret=' + (localProviderConfig.paypalClientSecret.length > 0 ? 'present(' + localProviderConfig.paypalClientSecret.length.toString() + ')' : 'missing') +
+    ', paypalEnvironment=' + localProviderConfig.paypalEnvironment +
+    ', paypalCheckoutGatewayUrl=' + (localProviderConfig.paypalCheckoutGatewayUrl.length > 0 ? 'present' : 'missing') +
+    ', stripeSecretKey=' + (localProviderConfig.stripeSecretKey.length > 0 ? 'present(' + localProviderConfig.stripeSecretKey.length.toString() + ')' : 'missing') +
+    ', stripePublishableKey=' + (localProviderConfig.stripePublishableKey.length > 0 ? 'present(' + localProviderConfig.stripePublishableKey.length.toString() + ')' : 'missing') +
+    ', stripeCheckoutGatewayUrl=' + (localProviderConfig.stripeCheckoutGatewayUrl.length > 0 ? 'present' : 'missing') +
+    ', stripeConnectReturnUrl=' + (localProviderConfig.stripeConnectReturnUrl.length > 0 ? 'present' : 'missing') +
+    ', stripeReceivingAgentJson=' + (localProviderConfig.stripeReceivingAgentJson.length > 0 ? 'present(' + localProviderConfig.stripeReceivingAgentJson.length.toString() + ')' : 'missing') +
+    ', paymentAccountBookJson=' + (localProviderConfig.paymentAccountBookJson.length > 0 ? 'present' : 'missing') +
+    ', paymentMode=' + localProviderConfig.paymentMode +
+    ', paymentLiveAllowedStripeAccountIds=' + (localProviderConfig.paymentLiveAllowedStripeAccountIds.length > 0 ? 'present' : 'missing') +
+    ', paymentLiveMaxAmountMinor=' + localProviderConfig.paymentLiveMaxAmountMinor +
     ', defaultLocation=' + (localProviderConfig.amapDefaultLocation.length > 0 ? 'present' : 'missing');
+}
+
+interface StripeConnectAccountIdRequest {
+  stripeAccountId: string;
+}
+
+type StripeConnectAccountCreator = (secretKey: string, body: Object) => Promise<StripeConnectAccountResult>;
+type StripeConnectOnboardingLinkCreator = (secretKey: string, body: Object, returnUrl: string, refreshUrl: string) => Promise<StripeConnectOnboardingLinkResult>;
+type StripeConnectStatusFetcher = (secretKey: string, body: Object) => Promise<StripeConnectStatusResult>;
+
+let stripeConnectAccountCreator: StripeConnectAccountCreator = createStripeConnectAccount;
+let stripeConnectOnboardingLinkCreator: StripeConnectOnboardingLinkCreator = createStripeConnectOnboardingLink;
+let stripeConnectStatusFetcher: StripeConnectStatusFetcher = fetchStripeConnectStatus;
+
+export function configureStripeConnectClientForTests(
+  accountCreator: StripeConnectAccountCreator | null,
+  onboardingLinkCreator: StripeConnectOnboardingLinkCreator | null,
+  statusFetcher: StripeConnectStatusFetcher | null
+): void {
+  stripeConnectAccountCreator = accountCreator === null ? createStripeConnectAccount : accountCreator;
+  stripeConnectOnboardingLinkCreator = onboardingLinkCreator === null ? createStripeConnectOnboardingLink : onboardingLinkCreator;
+  stripeConnectStatusFetcher = statusFetcher === null ? fetchStripeConnectStatus : statusFetcher;
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -1771,6 +2456,50 @@ function postFormText(url: string, headers: HttpRequestHeaders, body: string): P
   return postJsonText(url, headers, body);
 }
 
+export function isTransientPayPalRequestErrorForTest(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.indexOf('failed to resolve') >= 0 ||
+    lower.indexOf('resolve the host name') >= 0 ||
+    lower.indexOf('operation timeout') >= 0 ||
+    lower.indexOf('timed out') >= 0 ||
+    lower.indexOf('internal error') >= 0 ||
+    lower.indexOf('2300028') >= 0 ||
+    lower.indexOf('2300999') >= 0;
+}
+
+export function payPalApiFallbackUrlForTest(url: string): string {
+  if (url.startsWith('https://api-m.paypal.com/')) {
+    return 'https://api.paypal.com/' + url.substring('https://api-m.paypal.com/'.length);
+  }
+  if (url.startsWith('https://api-m.sandbox.paypal.com/')) {
+    return 'https://api.sandbox.paypal.com/' + url.substring('https://api-m.sandbox.paypal.com/'.length);
+  }
+  return '';
+}
+
+async function postPayPalTextWithRetry(action: string, url: string, headers: HttpRequestHeaders, body: string): Promise<HttpTextResponse> {
+  let lastError = '';
+  const fallbackUrl = payPalApiFallbackUrlForTest(url);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const requestUrl = attempt > 0 && fallbackUrl.length > 0 ? fallbackUrl : url;
+    try {
+      return await postJsonText(requestUrl, headers, body);
+    } catch (error) {
+      lastError = describeThrown(error);
+      if (!isTransientPayPalRequestErrorForTest(lastError) || attempt >= 2) {
+        const suffix = attempt >= 2 ? ' failed after 3 attempts: ' : ' failed: ';
+        throw new Error(action + suffix + lastError);
+      }
+      aiLogInfo('[AIPhone][PayPalHttpRetry] action=' + action +
+        ' attempt=' + (attempt + 2).toString() +
+        ' fallback=' + (requestUrl !== url ? 'true' : 'false') +
+        ' reason=' + lastError.substring(0, 160));
+      await waitForDebugDelay(500 * (attempt + 1));
+    }
+  }
+  throw new Error(action + ' failed after 3 attempts: ' + lastError);
+}
+
 function mcpHeaders(token: string, sessionId: string = ''): HttpRequestHeaders {
   if (sessionId.length > 0) {
     return {
@@ -1883,7 +2612,16 @@ function mcpToolPayloadFromText(text: string): Object {
     throw new Error('MCP 返回中没有 result。');
   }
   if (result.isError === true) {
-    throw new Error('MCP 工具返回错误状态。');
+    const errorParts: string[] = [];
+    const errorContent = result.content === undefined ? [] : result.content;
+    for (let index = 0; index < errorContent.length; index++) {
+      const item = errorContent[index];
+      const itemText = firstText([item.text, item.data]).trim();
+      if (itemText.length > 0) {
+        errorParts.push(itemText);
+      }
+    }
+    throw new Error(errorParts.length > 0 ? errorParts.join('；').substring(0, 300) : 'MCP 工具返回错误状态。');
   }
   if (result.structuredContent !== undefined && result.structuredContent !== null) {
     return result.structuredContent;
@@ -1898,6 +2636,9 @@ function mcpToolPayloadFromText(text: string): Object {
     const jsonSlice = firstJsonSlice(textValue);
     if (jsonSlice.length > 0) {
       return JSON.parse(jsonSlice) as Object;
+    }
+    if (textValue.length > 0) {
+      return JSON.parse('{"text":' + JSON.stringify(textValue) + '}') as Object;
     }
   }
   throw new Error('MCP 工具没有返回可解析的结构化 JSON。');
@@ -1932,6 +2673,9 @@ export function isReadonlyBrandMcpTool(provider: string, toolName: string): bool
       'queryShopList',
       'searchProductForMcp',
       'queryProductDetailInfo',
+      'switchProduct',
+      'previewOrder',
+      'createOrder',
       'queryOrderDetailInfo'
     ].indexOf(toolName) >= 0;
   }
@@ -1950,19 +2694,7 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
   if (!isReadonlyBrandMcpTool(provider, toolName)) {
     throw new Error(provider + ' MCP 工具 ' + toolName + ' 不在只读查询白名单内。');
   }
-  const initRequest: McpInitializeRequest = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: {
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: new EmptyMcpCapabilities(),
-      clientInfo: {
-        name: 'AIPhoneDemo',
-        version: '0.1'
-      }
-    }
-  };
+  const initRequest = buildInitializeRequest(1);
   const initBody = JSON.stringify(initRequest);
   const init = await postJsonText(url, mcpHeaders(token), initBody);
   if (init.code < 200 || init.code >= 300) {
@@ -1989,15 +2721,7 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
       aiLogInfo('[AIPhone][BrandMcpInitializedIgnored] provider=' + provider + ' error=' + describeThrown(error));
     }
   }
-  const callRequest: McpToolCallRequest = {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: {
-      name: toolName,
-      arguments: args
-    }
-  };
+  const callRequest = buildToolsCallRequest(2, toolName, args);
   const callBody = JSON.stringify(callRequest);
   aiLogInfo('[AIPhone][BrandMcpRequest] provider=' + provider + ' tool=' + toolName + ' url=' + url + ' bodyChars=' + callBody.length.toString());
   const response = await postJsonText(url, mcpHeaders(token, sessionId), callBody);
@@ -2005,6 +2729,1449 @@ async function callReadonlyBrandMcpTool(provider: string, url: string, token: st
     throw new Error(brandMcpHttpError(provider, toolName, response.code, response.text));
   }
   return mcpToolPayloadFromText(response.text);
+}
+
+function rideMcpHeaders(sessionId: string = ''): HttpRequestHeaders {
+  if (sessionId.length > 0) {
+    return {
+      'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+      'Accept': 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+      'MCP-Protocol-Version': MCP_PROTOCOL_VERSION,
+      'Mcp-Session-Id': sessionId
+    };
+  }
+  const headers: HttpRequestHeaders = {
+    'User-Agent': 'Mozilla/5.0 AIPhoneDemo/0.1',
+    'Accept': 'application/json, text/event-stream',
+    'Content-Type': 'application/json',
+    'MCP-Protocol-Version': MCP_PROTOCOL_VERSION
+  };
+  return headers;
+}
+
+function rideMcpUrlWithKey(baseUrl: string, key: string): string {
+  const trimmed = baseUrl.trim();
+  if (trimmed.indexOf('{key}') >= 0) {
+    return trimmed.replace('{key}', encodeURIComponent(key));
+  }
+  if (trimmed.indexOf('YOUR_MCP_KEY') >= 0) {
+    return trimmed.replace('YOUR_MCP_KEY', encodeURIComponent(key));
+  }
+  if (trimmed.indexOf('key=') >= 0) {
+    return trimmed;
+  }
+  return trimmed + (trimmed.indexOf('?') >= 0 ? '&' : '?') + 'key=' + encodeURIComponent(key);
+}
+
+function isAllowedRideMcpTool(provider: string, toolName: string): boolean {
+  if (provider === '滴滴') {
+    return ['maps_textsearch', 'taxi_estimate', 'taxi_generate_ride_app_link', 'taxi_create_order', 'taxi_cancel_order', 'taxi_get_driver_location'].indexOf(toolName) >= 0;
+  }
+  if (provider === '高德') {
+    const lower = toolName.toLowerCase();
+    return lower.indexOf('taxi') >= 0 || lower.indexOf('ride') >= 0 || toolName.indexOf('打车') >= 0;
+  }
+  return false;
+}
+
+async function rideMcpToolNames(url: string): Promise<DynamicMcpTool[]> {
+  const registration = rideMcpRegistration('ride.tools.list', '打车 MCP', url, 'tools/list');
+  const preflight = await new GenericMcpClient().preflight(registration, '');
+  return preflight.ok ? preflight.tools : [];
+}
+
+async function selectRideMcpToolName(provider: string, url: string, fallbackNames: string[], needles: string[]): Promise<string> {
+  let tools: DynamicMcpTool[] = [];
+  try {
+    tools = await rideMcpToolNames(url);
+  } catch (error) {
+    aiLogInfo('[AIPhone][RideMcpToolsListIgnored] provider=' + provider + ' error=' + describeThrown(error));
+  }
+  for (let fallbackIndex = 0; fallbackIndex < fallbackNames.length; fallbackIndex++) {
+    for (let toolIndex = 0; toolIndex < tools.length; toolIndex++) {
+      if (tools[toolIndex].name === fallbackNames[fallbackIndex]) {
+        return fallbackNames[fallbackIndex];
+      }
+    }
+  }
+  for (let toolIndex = 0; toolIndex < tools.length; toolIndex++) {
+    const haystack = (tools[toolIndex].name + ' ' + tools[toolIndex].description).toLowerCase();
+    for (let needleIndex = 0; needleIndex < needles.length; needleIndex++) {
+      if (haystack.indexOf(needles[needleIndex].toLowerCase()) >= 0) {
+        return tools[toolIndex].name;
+      }
+    }
+  }
+  return fallbackNames.length > 0 ? fallbackNames[0] : '';
+}
+
+function rideMcpRegistration(toolId: string, displayName: string, url: string, toolName: string): DynamicToolRegistration {
+  return {
+    toolId: toolId,
+    manifestId: 'ride.mcp',
+    displayName: displayName,
+    status: 'enabled',
+    transport: {
+      type: 'streamable_http',
+      url: url,
+      command: '',
+      args: [],
+      headers: {},
+      env: {}
+    },
+    mcpToolName: toolName,
+    credentialRef: '',
+    sourceUrl: url,
+    lastError: ''
+  };
+}
+
+async function callRideMcpTool(provider: string, url: string, toolName: string, args: Object): Promise<Object> {
+  if (!isAllowedRideMcpTool(provider, toolName)) {
+    throw new Error(provider + ' MCP 工具 ' + toolName + ' 不在打车只读/唤端白名单内。');
+  }
+  const initRequest = buildInitializeRequest(1);
+  const init = await postJsonText(url, rideMcpHeaders(), JSON.stringify(initRequest));
+  if (init.code < 200 || init.code >= 300) {
+    throw new Error(provider + ' MCP initialize HTTP ' + init.code.toString() + '：' + init.text.substring(0, 300));
+  }
+  const initParsed = parseMcpJsonRpcText(init.text);
+  if (initParsed.error !== undefined) {
+    throw new Error(provider + ' MCP initialize 返回错误：' + firstText([initParsed.error.message, initParsed.error.code, initParsed.error.data, 'MCP initialize error']));
+  }
+  const sessionId = headerValueFromJson(init.headers, 'mcp-session-id');
+  if (sessionId.length > 0) {
+    try {
+      const initializedNotification: McpInitializedNotification = {
+        jsonrpc: '2.0',
+        method: 'notifications/initialized'
+      };
+      await postJsonText(url, rideMcpHeaders(sessionId), JSON.stringify(initializedNotification));
+    } catch (error) {
+      aiLogInfo('[AIPhone][RideMcpInitializedIgnored] provider=' + provider + ' error=' + describeThrown(error));
+    }
+  }
+  const callRequest = buildToolsCallRequest(2, toolName, args);
+  const callBody = JSON.stringify(callRequest);
+  aiLogInfo('[AIPhone][RideMcpRequest] provider=' + provider + ' tool=' + toolName + ' urlChars=' + url.length.toString() + ' bodyChars=' + callBody.length.toString());
+  const response = await postJsonText(url, rideMcpHeaders(sessionId), callBody);
+  if (response.code < 200 || response.code >= 300) {
+    throw new Error(provider + ' MCP ' + toolName + ' HTTP ' + response.code.toString() + '：' + response.text.substring(0, 300));
+  }
+  return mcpToolPayloadFromText(response.text);
+}
+
+interface RideRoute {
+  origin: string;
+  destination: string;
+  city: string;
+}
+
+interface RidePoint {
+  name: string;
+  lng: string;
+  lat: string;
+  location: string;
+  city: string;
+}
+
+interface RideProduct {
+  productName: string;
+  productCategory: string;
+  priceText: string;
+}
+
+function rideArgs(args: Object | null): RideRouteArgs {
+  if (args === null) {
+    return JSON.parse('{}') as RideRouteArgs;
+  }
+  return args as RideRouteArgs;
+}
+
+function rideArgText(args: RideRouteArgs, keys: string[]): string {
+  const record = args as PaymentToolArgRecord;
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(record[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function rideRouteFromArgs(args: Object | null): RideRoute {
+  const parsed = rideArgs(args);
+  const origin = rideArgText(parsed, ['origin', 'from', 'start']);
+  const destination = rideArgText(parsed, ['destination', 'to', 'end']);
+  const city = rideArgText(parsed, ['city']);
+  return {
+    origin: origin,
+    destination: destination,
+    city: city
+  };
+}
+
+function rideOrderArgs(args: Object | null): RideOrderArgs {
+  if (args === null) {
+    return JSON.parse('{}') as RideOrderArgs;
+  }
+  return args as RideOrderArgs;
+}
+
+function rideOrderArgText(args: RideOrderArgs, keys: string[]): string {
+  const record = args as ToolArgRecord;
+  for (let index = 0; index < keys.length; index++) {
+    const value = textOf(record[keys[index]]).trim();
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return '';
+}
+
+function rideOrderConfirmed(args: RideOrderArgs): boolean {
+  const record = args as ToolArgRecord;
+  const confirmed = record.confirmed;
+  if (confirmed === true) {
+    return true;
+  }
+  const confirmedText = textOf(confirmed).trim().toLowerCase();
+  if (confirmedText === 'true' || confirmedText === 'yes') {
+    return true;
+  }
+  const confirmation = textOf(record.confirmation).trim();
+  return confirmation.indexOf('确认') >= 0 && confirmation.indexOf('下单') >= 0;
+}
+
+function rideDidiCreateOrderArgs(args: Object | null): RideDidiCreateOrderArgs {
+  const parsed = rideOrderArgs(args);
+  return {
+    product_category: rideOrderArgText(parsed, ['product_category', 'productCategory']),
+    estimate_trace_id: rideOrderArgText(parsed, ['estimate_trace_id', 'estimateTraceId', 'traceId'])
+  };
+}
+
+function rideOrderRouteContext(args: Object | null): RideOrderRouteContext {
+  const parsed = rideOrderArgs(args);
+  return {
+    routeText: rideOrderArgText(parsed, ['routeText', 'route']),
+    pickupLocation: rideOrderArgText(parsed, ['pickupLocation', 'originLocation', 'fromLocation']),
+    destinationLocation: rideOrderArgText(parsed, ['destinationLocation', 'toLocation']),
+    selectedVehicleText: rideOrderArgText(parsed, ['productName', 'vehicle', 'productCategory', 'product_category']),
+    estimateCacheJson: rideOrderArgText(parsed, ['estimateCacheJson'])
+  };
+}
+
+function hasRideRowLabel(rows: A2uiLabelValueData[], label: string): boolean {
+  for (let index = 0; index < rows.length; index++) {
+    if (rows[index].label === label) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function appendRideRouteContextRows(rows: A2uiLabelValueData[], context: RideOrderRouteContext): void {
+  if (context.routeText.length > 0) {
+    rows.push({ label: '路线', value: context.routeText });
+  }
+  if (context.pickupLocation.length > 0) {
+    rows.push({ label: '起点坐标', value: context.pickupLocation });
+  }
+  if (context.destinationLocation.length > 0) {
+    rows.push({ label: '终点坐标', value: context.destinationLocation });
+  }
+  if (context.selectedVehicleText.length > 0 && !hasRideRowLabel(rows, '车型')) {
+    rows.push({ label: '车型', value: context.selectedVehicleText });
+  }
+}
+
+function rideEstimateCacheJson(products: RideProduct[], traceId: string): string {
+  const records: RideEstimateCacheProductRecord[] = [];
+  products.forEach((product: RideProduct) => {
+    const record: RideEstimateCacheProductRecord = {
+      productName: product.productName,
+      productCategory: product.productCategory,
+      priceText: product.priceText
+    };
+    records.push(record);
+  });
+  const payload: RideEstimateCachePayload = {
+    traceId: traceId,
+    products: records
+  };
+  return JSON.stringify(payload);
+}
+
+function rideDidiCancelOrderArgs(args: Object | null): RideDidiCancelOrderArgs {
+  const parsed = rideOrderArgs(args);
+  const orderArgs: RideDidiCancelOrderArgs = {
+    order_id: rideOrderArgText(parsed, ['order_id', 'orderId'])
+  };
+  const reason = rideOrderArgText(parsed, ['reason']);
+  if (reason.length > 0) {
+    orderArgs.reason = reason;
+  }
+  return orderArgs;
+}
+
+function rideDidiDriverLocationArgs(args: Object | null): RideDidiDriverLocationArgs {
+  const parsed = rideOrderArgs(args);
+  return {
+    order_id: rideOrderArgText(parsed, ['order_id', 'orderId'])
+  };
+}
+
+export function rideDidiCreateOrderArgsForTest(args: Object | null): Object {
+  return rideDidiCreateOrderArgs(args);
+}
+
+export function rideDidiCancelOrderArgsForTest(args: Object | null): Object {
+  return rideDidiCancelOrderArgs(args);
+}
+
+export function rideDidiDriverLocationArgsForTest(args: Object | null): Object {
+  return rideDidiDriverLocationArgs(args);
+}
+
+export function rideOrderConfirmedForTest(args: Object | null): boolean {
+  return rideOrderConfirmed(rideOrderArgs(args));
+}
+
+function rideErrorResult(sourceTag: string, toolName: string, title: string, summary: string): DynamicGenericToolResult {
+  return {
+    sourceTag: sourceTag,
+    toolName: toolName,
+    title: title,
+    status: 'error',
+    summary: summary,
+    rows: [
+      { label: '状态', value: summary }
+    ],
+    rawPreview: summary
+  };
+}
+
+function rideObjectValue(value: Object, key: string): Object | string | number | boolean | null | undefined {
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  return record[key];
+}
+
+function rideNestedObject(payload: Object, key: string): Object | null {
+  const value = rideObjectValue(payload, key);
+  if (value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Object;
+  }
+  return null;
+}
+
+function ridePayloadRoot(payload: Object): Object {
+  const structured = rideNestedObject(payload, 'structuredContent');
+  return structured === null ? payload : structured;
+}
+
+function ridePayloadItems(payload: Object): Object[] {
+  const root = ridePayloadRoot(payload);
+  if (Array.isArray(root)) {
+    return root as Object[];
+  }
+  const rootRecord = root as Record<string, Object | Object[] | string | number | boolean | null | undefined>;
+  if (Array.isArray(rootRecord.items)) {
+    return rootRecord.items as Object[];
+  }
+  if (Array.isArray(rootRecord.data)) {
+    return rootRecord.data as Object[];
+  }
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    const dataRecord = data as Record<string, Object | Object[] | string | number | boolean | null | undefined>;
+    if (Array.isArray(dataRecord.items)) {
+      return dataRecord.items as Object[];
+    }
+    if (Array.isArray(dataRecord.list)) {
+      return dataRecord.list as Object[];
+    }
+  }
+  return [];
+}
+
+function rideTraceId(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  return firstText([
+    rideObjectValue(root, 'traceId'),
+    rideObjectValue(root, 'trace_id'),
+    rideObjectValue(root, 'estimate_trace_id')
+  ]);
+}
+
+function rideProductsFromPayload(payload: Object): RideProduct[] {
+  const items = ridePayloadItems(payload);
+  const products: RideProduct[] = [];
+  items.forEach((item: Object) => {
+    const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+    const productName = firstText([record.productName, record.name, record.title]);
+    const productCategory = firstText([record.productCategory, record.category, record.product_category]);
+    const priceText = firstText([record.priceText, record.price, record.estimatePrice, record.amount]);
+    if (productName.length > 0 || priceText.length > 0) {
+      products.push({
+        productName: productName.length > 0 ? productName : '车型',
+        productCategory: productCategory,
+        priceText: priceText.length > 0 ? priceText : '价格未返回'
+      });
+    }
+  });
+  return products;
+}
+
+function rideLinkFromPayload(payload: Object): string {
+  const json = JSON.stringify(payload);
+  const linkMatch = /((?:diditaxi|amapuri):\/\/[^"\s\\]+|https?:\/\/[^"\s\\]+)/.exec(json);
+  return linkMatch !== null && linkMatch.length > 1 ? jsonTextUnescape(linkMatch[1]) : '';
+}
+
+function rideCoordinateString(value: Object | string | number | boolean | null | undefined): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text)) {
+      return text.replace(/\s+/g, '');
+    }
+    const lngMatch = /(经度|lng|lon|longitude)\s*[:：]\s*(-?\d+(?:\.\d+)?)/i.exec(text);
+    const latMatch = /(纬度|lat|latitude)\s*[:：]\s*(-?\d+(?:\.\d+)?)/i.exec(text);
+    if (lngMatch !== null && lngMatch.length > 2 && latMatch !== null && latMatch.length > 2) {
+      return lngMatch[2] + ',' + latMatch[2];
+    }
+    return '';
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+  const record = value as Record<string, Object | string | number | boolean | null | undefined>;
+  const lng = firstText([record.lng, record.lon, record.longitude]);
+  const lat = firstText([record.lat, record.latitude]);
+  return lng.length > 0 && lat.length > 0 ? lng + ',' + lat : '';
+}
+
+function rideCoordinateFromPayload(payload: Object): string {
+  const root = ridePayloadRoot(payload);
+  const candidates: Array<Object | string | number | boolean | null | undefined> = [
+    rideObjectValue(root, 'location'),
+    rideObjectValue(root, 'coordinate'),
+    rideObjectValue(root, 'point')
+  ];
+  const items = ridePayloadItems(payload);
+  if (items.length > 0) {
+    const first = items[0];
+    candidates.push(first);
+    candidates.push(rideObjectValue(first, 'location'));
+  }
+  for (let index = 0; index < candidates.length; index++) {
+    const coordinate = rideCoordinateString(candidates[index]);
+    if (coordinate.length > 0) {
+      return coordinate;
+    }
+  }
+  return '';
+}
+
+function ridePointFromSearchPayload(name: string, payload: Object): RidePoint {
+  const location = rideCoordinateFromPayload(payload);
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: ''
+  };
+}
+
+function ridePointFromAmapResolution(name: string, resolution: AmapLocationResolution): RidePoint {
+  const parts = resolution.location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: resolution.location,
+    city: rideDidiCityText(resolution.city)
+  };
+}
+
+function rideDidiCityFromRouteOrAmap(routeCity: string, origin: RidePoint | null, destination: RidePoint | null): string {
+  const direct = rideDidiCityText(routeCity);
+  if (direct.length > 0) {
+    return direct;
+  }
+  return rideDidiCityText(firstText([
+    origin === null ? '' : origin.city,
+    destination === null ? '' : destination.city
+  ]));
+}
+
+function rideKnownMockLocation(name: string, fallback: string): string {
+  const normalized = name.replace(/\s+/g, '');
+  if (normalized.indexOf('华为坂田基地') >= 0 || normalized.indexOf('坂田') >= 0) {
+    return '114.066231,22.657805';
+  }
+  if (normalized.indexOf('秋港花园') >= 0) {
+    return '114.060432,22.548829';
+  }
+  if (normalized.indexOf('深圳北') >= 0) {
+    return '114.029415,22.609722';
+  }
+  if (normalized.indexOf('深圳湾万象城') >= 0) {
+    return '113.943021,22.523382';
+  }
+  return fallback;
+}
+
+function rideMockPoint(name: string, fallbackLocation: string): RidePoint {
+  const location = rideKnownMockLocation(name, fallbackLocation);
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: '深圳'
+  };
+}
+
+function rideMockTraceId(origin: RidePoint, destination: RidePoint): string {
+  return 'mock-' + origin.location.replace(',', '') + '-' + destination.location.replace(',', '');
+}
+
+function rideMockEstimatePayload(traceId: string): RideMockEstimatePayload {
+  const items: RideEstimateCacheProductRecord[] = [
+    { productName: '特惠快车', productCategory: 'discount_express', priceText: '10' },
+    { productName: '快车', productCategory: 'express', priceText: '15' },
+    { productName: '专车', productCategory: 'premium', priceText: '30' },
+    { productName: '豪华车', productCategory: 'luxury', priceText: '100' }
+  ];
+  return {
+    structuredContent: {
+      items: items,
+      traceId: traceId
+    }
+  };
+}
+
+function rideMockOrderId(requestArgs: RideDidiCreateOrderArgs): string {
+  const category = requestArgs.product_category.length > 0 ? requestArgs.product_category : 'ride';
+  return 'MOCK-' + category.toUpperCase().replace(/[^A-Z0-9_]/g, '') + '-001';
+}
+
+function rideMockOrderPayload(requestArgs: RideDidiCreateOrderArgs): RideMockOrderPayload {
+  return {
+    orderId: rideMockOrderId(requestArgs),
+    status: 'mock_order_created'
+  };
+}
+
+function rideMockDriverPayload(_requestArgs: RideDidiDriverLocationArgs): RideMockDriverPayload {
+  return {
+    location: '114.063920,22.637910',
+    driverName: '陈师傅',
+    eta: '预计 6 分钟接驾',
+    status: 'mock_driver_en_route'
+  };
+}
+
+function rideMockCancelPayload(): RideMockCancelPayload {
+  return {
+    status: 'mock_cancelled'
+  };
+}
+
+function rideRouteOriginText(routeText: string): string {
+  const parts = routeText.split('→');
+  return parts.length > 0 ? parts[0].trim() : '';
+}
+
+function rideRouteDestinationText(routeText: string): string {
+  const parts = routeText.split('→');
+  return parts.length > 1 ? parts[1].trim() : '';
+}
+
+function rideOrderConfirmAction(product: RideProduct, traceId: string, origin: RidePoint, destination: RidePoint, estimateCacheJson: string, isPrimary: boolean): A2uiAction {
+  const args: RideOrderActionArgs = {
+    productCategory: product.productCategory,
+    product_category: product.productCategory,
+    productName: product.productName,
+    priceText: product.priceText,
+    routeText: origin.name + ' → ' + destination.name,
+    origin: origin.name,
+    destination: destination.name,
+    pickupLocation: origin.location,
+    originLocation: origin.location,
+    destinationLocation: destination.location,
+    estimateCacheJson: estimateCacheJson,
+    estimateTraceId: traceId,
+    estimate_trace_id: traceId,
+    traceId: traceId,
+    confirmed: true,
+    confirmation: '确认下单'
+  };
+  return {
+    id: 'ride.order.confirm',
+    label: '确认叫' + product.productName,
+    prompt: '确认下单：' + product.productName + ' ' + product.priceText,
+    kind: 'prompt',
+    variant: isPrimary ? 'primary' : 'secondary',
+    args: args
+  };
+}
+
+function rideOrderConfirmActions(products: RideProduct[], traceId: string, origin: RidePoint, destination: RidePoint): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  if (traceId.length === 0) {
+    return actions;
+  }
+  const estimateCache = rideEstimateCacheJson(products, traceId);
+  products.forEach((product: RideProduct) => {
+    if (product.productCategory.length > 0) {
+      actions.push(rideOrderConfirmAction(product, traceId, origin, destination, estimateCache, actions.length === 0));
+    }
+  });
+  return actions;
+}
+
+function rideEstimateResult(origin: RidePoint, destination: RidePoint, estimatePayload: Object): DynamicGenericToolResult {
+  const products = rideProductsFromPayload(estimatePayload);
+  const traceId = rideTraceId(estimatePayload);
+  if (products.length === 0) {
+    return rideErrorResult('滴滴', 'ride.estimate', '滴滴价格预估未返回车型', '滴滴 MCP 没有返回可展示的车型和价格。');
+  }
+  const rows: A2uiLabelValueData[] = [
+    { label: '路线', value: origin.name + ' → ' + destination.name },
+    { label: '起点坐标', value: origin.location },
+    { label: '终点坐标', value: destination.location }
+  ];
+  products.forEach((product: RideProduct) => {
+    const category = product.productCategory.length > 0 ? '（' + product.productCategory + '）' : '';
+    rows.push({
+      label: product.productName + category,
+      value: product.priceText
+    });
+  });
+  if (traceId.length > 0) {
+    rows.push({
+      label: 'traceId',
+      value: traceId.length > 16 ? traceId.substring(0, 8) + '...' + traceId.substring(traceId.length - 6) : traceId
+    });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_estimate' });
+  const summaryParts: string[] = [];
+  products.forEach((product: RideProduct) => summaryParts.push(product.productName + ' ' + product.priceText));
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.estimate',
+    title: '滴滴价格预估',
+    status: 'success',
+    summary: summaryParts.join('；') + '。',
+    rows: rows,
+    rawPreview: JSON.stringify(estimatePayload).substring(0, 1200),
+    actions: rideOrderConfirmActions(products, traceId, origin, destination)
+  };
+}
+
+function rideLinkActions(didiLink: string, amapLink: string): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  if (didiLink.length > 0) {
+    actions.push({
+      id: 'ride.open.didi',
+      label: '打开滴滴',
+      prompt: didiLink,
+      kind: 'client',
+      variant: 'primary'
+    });
+  }
+  if (amapLink.length > 0) {
+    actions.push({
+      id: 'ride.open.amap',
+      label: '打开高德',
+      prompt: amapLink,
+      kind: 'client',
+      variant: didiLink.length > 0 ? 'secondary' : 'primary'
+    });
+  }
+  return actions;
+}
+
+function rideShouldSurfaceAppLinkError(toolId: string): boolean {
+  return toolId === 'ride.app.link';
+}
+
+export function rideShouldSurfaceAppLinkErrorForTest(toolId: string): boolean {
+  return rideShouldSurfaceAppLinkError(toolId);
+}
+
+function rideLinkResult(origin: string, destination: string, didiLink: string, amapLink: string, originLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult {
+  const rows: A2uiLabelValueData[] = [
+    { label: '路线', value: origin + ' → ' + destination }
+  ];
+  if (originLocation.length > 0) {
+    rows.push({ label: '起点坐标', value: originLocation });
+  }
+  if (destinationLocation.length > 0) {
+    rows.push({ label: '终点坐标', value: destinationLocation });
+  }
+  if (didiLink.length > 0) {
+    rows.push({ label: '滴滴链接', value: didiLink });
+  }
+  if (amapLink.length > 0) {
+    rows.push({ label: '高德链接', value: amapLink });
+  }
+  rows.push({ label: '来源', value: '滴滴 App 链接 / 高德打车唤端链接' });
+  const rawPreview: RideLinkPreview = {
+    didiLink: didiLink.length,
+    amapLink: amapLink.length
+  };
+  return {
+    sourceTag: '滴滴 / 高德',
+    toolName: 'ride.app.link',
+    title: 'App 打车链接',
+    status: didiLink.length > 0 || amapLink.length > 0 ? 'success' : 'error',
+    summary: didiLink.length > 0 || amapLink.length > 0 ? '已生成可手动打开的 App 打车链接；不会自动叫车。' : '没有可打开的 App 打车链接。',
+    rows: rows,
+    rawPreview: JSON.stringify(rawPreview),
+    actions: rideLinkActions(didiLink, amapLink)
+  };
+}
+
+function rideOrderPayloadText(payload: Object, keys: string[]): string {
+  const root = ridePayloadRoot(payload);
+  const items = ridePayloadItems(payload);
+  for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+    const value = firstText([rideObjectValue(root, keys[keyIndex])]);
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  if (items.length > 0) {
+    const first = items[0];
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+      const value = firstText([rideObjectValue(first, keys[keyIndex])]);
+      if (value.length > 0) {
+        return value;
+      }
+    }
+  }
+  const data = rideNestedObject(root, 'data');
+  if (data !== null) {
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+      const value = firstText([rideObjectValue(data, keys[keyIndex])]);
+      if (value.length > 0) {
+        return value;
+      }
+    }
+  }
+  return '';
+}
+
+function rideCancelAction(orderId: string, context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {
+    orderId: orderId,
+    order_id: orderId,
+    reason: '用户取消'
+  };
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.order.cancel',
+    label: '取消订单',
+    prompt: '取消滴滴打车订单',
+    kind: 'prompt',
+    variant: 'secondary',
+    args: args
+  };
+}
+
+function rideDriverLocationAction(orderId: string, isPrimary: boolean, context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {
+    orderId: orderId,
+    order_id: orderId
+  };
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.driver.location.refresh',
+    label: '刷新司机位置',
+    prompt: '刷新滴滴司机位置',
+    kind: 'prompt',
+    variant: isPrimary ? 'primary' : 'secondary',
+    args: args
+  };
+}
+
+function rideRetryQueryAction(context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {};
+  if (context !== null) {
+    const origin = rideRouteOriginText(context.routeText);
+    const destination = rideRouteDestinationText(context.routeText);
+    args.routeText = context.routeText;
+    args.origin = origin;
+    args.destination = destination;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.query.retry',
+    label: '重新查询',
+    prompt: context !== null && context.routeText.length > 0 ? '重新查询打车方案：' + context.routeText : '重新查询打车方案',
+    kind: 'prompt',
+    variant: 'primary',
+    args: args
+  };
+}
+
+function rideChangeVehicleAction(context: RideOrderRouteContext | null = null): A2uiAction {
+  const args: RideOrderActionArgs = {};
+  if (context !== null) {
+    args.routeText = context.routeText;
+    args.pickupLocation = context.pickupLocation;
+    args.originLocation = context.pickupLocation;
+    args.destinationLocation = context.destinationLocation;
+    args.productName = context.selectedVehicleText;
+    args.estimateCacheJson = context.estimateCacheJson;
+  }
+  return {
+    id: 'ride.vehicle.change',
+    label: '换车型',
+    prompt: '恢复车型选择',
+    kind: 'client',
+    variant: 'secondary',
+    args: args
+  };
+}
+
+function rideCreateOrderResult(payload: Object, requestArgs: RideDidiCreateOrderArgs, context: RideOrderRouteContext): DynamicGenericToolResult {
+  const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status']);
+  const rows: A2uiLabelValueData[] = [
+    { label: '车型', value: context.selectedVehicleText.length > 0 ? context.selectedVehicleText : requestArgs.product_category },
+    { label: 'traceId', value: requestArgs.estimate_trace_id.length > 16 ? requestArgs.estimate_trace_id.substring(0, 8) + '...' + requestArgs.estimate_trace_id.substring(requestArgs.estimate_trace_id.length - 6) : requestArgs.estimate_trace_id }
+  ];
+  appendRideRouteContextRows(rows, context);
+  if (orderId.length > 0) {
+    rows.push({ label: '订单号', value: orderId });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_create_order（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.order.create',
+    title: '滴滴订单已提交',
+    status: 'success',
+    summary: orderId.length > 0 ? '已在滴滴 ' + rideDidiMcpModeLabel() + ' 提交订单，可在本应用内取消。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 下单接口，但响应里没有返回订单号。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: orderId.length > 0 ? [rideDriverLocationAction(orderId, true, context), rideCancelAction(orderId, context)] : []
+  };
+}
+
+function rideCancelOrderResult(payload: Object, requestArgs: RideDidiCancelOrderArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'cancelStatus', 'cancel_status']);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: requestArgs.order_id }
+  ];
+  if (requestArgs.reason !== undefined && requestArgs.reason.length > 0) {
+    rows.push({ label: '原因', value: requestArgs.reason });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_cancel_order（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.order.cancel',
+    title: '滴滴订单已取消',
+    status: 'success',
+    summary: '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 取消订单接口。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: [rideRetryQueryAction(context), rideChangeVehicleAction(context)]
+  };
+}
+
+function rideDriverCoordinate(payload: Object, lngKeys: string[], latKeys: string[]): string {
+  const root = ridePayloadRoot(payload);
+  const location = firstText([
+    rideObjectValue(root, 'location'),
+    rideObjectValue(root, 'driver_location'),
+    rideObjectValue(root, 'driverLocation'),
+    rideObjectValue(root, 'text')
+  ]).trim();
+  const locationCoordinate = rideCoordinateString(location);
+  if (locationCoordinate.length > 0) {
+    return locationCoordinate;
+  }
+  const data = rideNestedObject(root, 'data');
+  const candidates: Object[] = data === null ? [root] : [root, data];
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+    const candidate = candidates[candidateIndex];
+    let lng = '';
+    let lat = '';
+    for (let index = 0; index < lngKeys.length; index++) {
+      lng = firstText([rideObjectValue(candidate, lngKeys[index])]).trim();
+      if (lng.length > 0) {
+        break;
+      }
+    }
+    for (let index = 0; index < latKeys.length; index++) {
+      lat = firstText([rideObjectValue(candidate, latKeys[index])]).trim();
+      if (lat.length > 0) {
+        break;
+      }
+    }
+    if (lng.length > 0 && lat.length > 0) {
+      return lng + ',' + lat;
+    }
+  }
+  return '';
+}
+
+function rideDriverEtaText(payload: Object): string {
+  const raw = rideOrderPayloadText(payload, [
+    'eta',
+    'ETA',
+    'driverEta',
+    'driver_eta',
+    'driverArrivalEta',
+    'driver_arrival_eta',
+    'estimatedArrivalTime',
+    'estimated_arrival_time',
+    'estimatedTime',
+    'estimated_time',
+    'arrivalTime',
+    'arrival_time'
+  ]).trim();
+  if (raw.length === 0) {
+    return '';
+  }
+  if (raw.indexOf('预计') >= 0 || raw.indexOf('分钟') >= 0 || raw.indexOf('接驾') >= 0) {
+    return raw;
+  }
+  const numeric = Number(raw);
+  if (!isNaN(numeric)) {
+    const minutes = numeric > 30 ? Math.max(1, Math.round(numeric / 60)) : Math.max(1, Math.round(numeric));
+    return '预计 ' + minutes.toString() + ' 分钟接驾';
+  }
+  return raw;
+}
+
+function rideDriverLocationResult(payload: Object, requestArgs: RideDidiDriverLocationArgs, context: RideOrderRouteContext | null = null): DynamicGenericToolResult {
+  const location = rideDriverCoordinate(payload, ['lng', 'lon', 'longitude', 'driver_lng', 'driverLng'], ['lat', 'latitude', 'driver_lat', 'driverLat']);
+  const status = rideOrderPayloadText(payload, ['status', 'orderStatus', 'order_status', 'driverStatus', 'driver_status']);
+  const driverName = rideOrderPayloadText(payload, ['driverName', 'driver_name', 'name']);
+  const etaText = rideDriverEtaText(payload);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: requestArgs.order_id }
+  ];
+  if (context !== null) {
+    appendRideRouteContextRows(rows, context);
+  }
+  if (location.length > 0) {
+    rows.push({ label: '司机位置', value: location });
+  }
+  if (driverName.length > 0) {
+    rows.push({ label: '司机', value: driverName });
+  }
+  if (etaText.length > 0) {
+    rows.push({ label: '预计接驾时间', value: etaText });
+  }
+  if (status.length > 0) {
+    rows.push({ label: '状态', value: status });
+  }
+  rows.push({ label: '来源', value: '滴滴 taxi_get_driver_location（' + rideDidiMcpModeLabel() + '）' });
+  return {
+    sourceTag: '滴滴',
+    toolName: 'ride.driver.location',
+    title: '滴滴司机位置',
+    status: 'success',
+    summary: location.length > 0 ? '已返回司机当前位置。' : '已调用滴滴 ' + rideDidiMcpModeLabel() + ' 刷新司机位置接口，但响应里没有可展示的位置。',
+    rows: rows,
+    rawPreview: JSON.stringify(payload).substring(0, 1200),
+    actions: [rideDriverLocationAction(requestArgs.order_id, true, context), rideCancelAction(requestArgs.order_id, context)]
+  };
+}
+
+export function rideDriverLocationResultForTest(payload: Object, orderId: string, pickupLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult {
+  const context: RideOrderRouteContext | null = pickupLocation.length > 0 || destinationLocation.length > 0 ? {
+    routeText: '测试起点 → 测试终点',
+    pickupLocation: pickupLocation,
+    destinationLocation: destinationLocation,
+    selectedVehicleText: '',
+    estimateCacheJson: ''
+  } : null;
+  return rideDriverLocationResult(payload, { order_id: orderId }, context);
+}
+
+export function rideCancelOrderResultForTest(payload: Object, orderId: string): DynamicGenericToolResult {
+  return rideCancelOrderResult(payload, { order_id: orderId, reason: '用户取消' });
+}
+
+export function rideResultsFromMcpPayloadsForTest(origin: string, destination: string, estimatePayload: Object, didiLinkPayload: Object, amapLinkPayload: Object, originLocation: string = '', destinationLocation: string = ''): DynamicGenericToolResult[] {
+  return [
+    rideEstimateResult(ridePointForTest(origin, originLocation), ridePointForTest(destination, destinationLocation), estimatePayload),
+    rideLinkResult(origin, destination, rideLinkFromPayload(didiLinkPayload), rideLinkFromPayload(amapLinkPayload), originLocation, destinationLocation)
+  ];
+}
+
+function rideDidiRequestArgs(origin: RidePoint, destination: RidePoint, includeNames: boolean): RideDidiRequestArgs {
+  const args: RideDidiRequestArgs = {
+    from_lng: origin.lng,
+    from_lat: origin.lat,
+    to_lng: destination.lng,
+    to_lat: destination.lat
+  };
+  if (includeNames) {
+    args.from_name = origin.name;
+    args.to_name = destination.name;
+  }
+  return args;
+}
+
+function rideAmapRequestArgs(origin: RidePoint, destination: RidePoint): RideAmapAppLinkArgs {
+  return {
+    slon: origin.lng,
+    slat: origin.lat,
+    sname: origin.name,
+    dlon: destination.lng,
+    dlat: destination.lat,
+    dname: destination.name
+  };
+}
+
+function ridePointForTest(name: string, location: string): RidePoint {
+  const parts = location.split(',');
+  return {
+    name: name,
+    lng: parts.length > 1 ? parts[0] : '',
+    lat: parts.length > 1 ? parts[1] : '',
+    location: location,
+    city: ''
+  };
+}
+
+export function rideAmapRequestArgsForTest(origin: string, destination: string): Object {
+  return rideAmapRequestArgs(
+    ridePointForTest('起点', origin),
+    ridePointForTest('终点', destination)
+  );
+}
+
+export function rideAmapGeocodePointForTest(name: string, payload: Object): Object {
+  return ridePointFromAmapResolution(name, amapResolutionFromGeocodePayload(payload as AmapPayload));
+}
+
+export function rideDidiCityFromAmapGeocodeForTest(payload: Object): string {
+  return rideDidiCityText(amapResolutionFromGeocodePayload(payload as AmapPayload).city);
+}
+
+function rideAmapGeocodeKey(): string {
+  const webKey = localProviderConfig.amapKey.trim();
+  return webKey.length > 0 ? webKey : localProviderConfig.amapMcpKey.trim();
+}
+
+export function rideAmapGeocodeKeyForTest(): string {
+  return rideAmapGeocodeKey();
+}
+
+export function rideAmapWebKeyForUi(): string {
+  return localProviderConfig.amapKey.trim();
+}
+
+export function rideLinkFromMcpResponseTextForTest(text: string): string {
+  return rideLinkFromPayload(mcpToolPayloadFromText(text));
+}
+
+async function resolveDidiRidePoint(url: string, name: string, city: string): Promise<RidePoint> {
+  const args: RideDidiTextSearchArgs = {
+    keywords: name,
+    city: city
+  };
+  const payload = await callRideMcpTool('滴滴', url, 'maps_textsearch', args);
+  const point = ridePointFromSearchPayload(name, payload);
+  if (point.location.length === 0) {
+    throw new Error('滴滴 maps_textsearch 未返回 ' + name + ' 的经纬度。');
+  }
+  return point;
+}
+
+async function resolveAmapRidePoint(name: string, cityHint: string, key: string): Promise<RidePoint> {
+  const city = rideDidiCityText(cityHint);
+  if (isLandmarkPlace(name)) {
+    const poi = await searchAmapPoiLocation(name, city.length > 0 ? city : inferAmapCityFromPlace(name), key);
+    if (poi.location.length > 0) {
+      return ridePointFromAmapResolution(name, poi);
+    }
+  }
+  const geo = await geocodeAmapAddress(name, key, city);
+  if (geo.location.length > 0) {
+    return ridePointFromAmapResolution(name, geo);
+  }
+  const poi = await searchAmapPoiLocation(name, city.length > 0 ? city : inferAmapCityFromPlace(name), key);
+  if (poi.location.length > 0) {
+    return ridePointFromAmapResolution(name, poi);
+  }
+  throw new Error('高德地理编码未返回 ' + name + ' 的经纬度。');
+}
+
+function rideDidiQueryMcpUrl(): string {
+  return rideMcpUrlWithKey(localProviderConfig.didiMcpUrl, localProviderConfig.didiMcpKey.trim());
+}
+
+export function rideDidiQueryMcpUrlForTest(): string {
+  return rideDidiQueryMcpUrl();
+}
+
+function rideDidiOrderMcpUrl(): string {
+  return rideMcpUrlWithKey(localProviderConfig.didiMcpUrl, localProviderConfig.didiMcpKey.trim());
+}
+
+export function rideDidiOrderMcpUrlForTest(): string {
+  return rideDidiOrderMcpUrl();
+}
+
+function rideMockEnabled(): boolean {
+  if (localProviderConfig.didiMcpSandbox === 'false') {
+    return false;
+  }
+  return localProviderConfig.rideMockEnabled.trim().toLowerCase() === 'true';
+}
+
+function rideDidiMcpModeLabel(): string {
+  return localProviderConfig.didiMcpSandbox === 'false' ? 'production' : 'sandbox';
+}
+
+function rideOrderCreateDedupKey(args: RideDidiCreateOrderArgs): string {
+  if (args.product_category.length === 0 || args.estimate_trace_id.length === 0) {
+    return '';
+  }
+  return args.product_category + '|' + args.estimate_trace_id;
+}
+
+function rideOrderCreateDedupBlocked(previousKey: string, currentKey: string, elapsedMs: number): boolean {
+  return previousKey.length > 0 &&
+    currentKey.length > 0 &&
+    previousKey === currentKey &&
+    elapsedMs >= 0 &&
+    elapsedMs < RIDE_ORDER_CREATE_DEDUP_MS;
+}
+
+export function rideOrderCreateDedupBlockedForTest(previousKey: string, currentKey: string, elapsedMs: number): boolean {
+  return rideOrderCreateDedupBlocked(previousKey, currentKey, elapsedMs);
+}
+
+function rideOrderCreateErrorTitle(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.indexOf('user_taxi_create_order') >= 0 &&
+    (lower.indexOf('quota') >= 0 || lower.indexOf('rate limit') >= 0)) {
+    return '下单额度已耗尽';
+  }
+  return '滴滴下单失败';
+}
+
+export function rideOrderCreateErrorTitleForTest(message: string): string {
+  return rideOrderCreateErrorTitle(message);
+}
+
+function rideOrderCreateErrorSummary(message: string): string {
+  if (rideOrderCreateErrorTitle(message) === '下单额度已耗尽') {
+    return '滴滴 MCP 的 user_taxi_create_order 下单额度已耗尽。请稍后再试，或先使用打开滴滴/高德入口继续人工叫车。';
+  }
+  return message;
+}
+
+async function callLocalDidiRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const parsed = rideOrderArgs(args);
+  const requestArgs = rideDidiCreateOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 下单接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (!rideOrderConfirmed(parsed)) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '需要明确确认车型', '请先查看滴滴价格预估，并明确点击某个车型的确认下单按钮。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '缺少下单参数', '滴滴下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  const dedupKey = rideOrderCreateDedupKey(requestArgs);
+  const nowMs = new Date().getTime();
+  if (rideOrderCreateDedupBlocked(lastRideOrderCreateKey, dedupKey, nowMs - lastRideOrderCreateAtMs)) {
+    results.push(rideErrorResult('滴滴', 'ride.order.create', '下单请求已提交', '短时间内已经提交过同一车型的下单请求，为避免重复消耗 provider quota，本次没有再次调用 taxi_create_order。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  lastRideOrderCreateKey = dedupKey;
+  lastRideOrderCreateAtMs = nowMs;
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_create_order', requestArgs);
+    const createResult = rideCreateOrderResult(payload, requestArgs, routeContext);
+    results.push(createResult);
+    const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+    if (orderId.length > 0) {
+      const driverLocationArgs: RideDidiDriverLocationArgs = { order_id: orderId };
+      try {
+        const driverPayload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', driverLocationArgs);
+        results.push(rideDriverLocationResult(driverPayload, driverLocationArgs, routeContext));
+      } catch (locationError) {
+        results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(locationError)));
+      }
+    }
+  } catch (error) {
+    const message = describeThrown(error);
+    results.push(rideErrorResult('滴滴', 'ride.order.create', rideOrderCreateErrorTitle(message), rideOrderCreateErrorSummary(message)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+}
+
+async function callLocalDidiRideCancelOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const requestArgs = rideDidiCancelOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 取消订单接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+  }
+  if (requestArgs.order_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '缺少订单号', '取消滴滴订单需要 order_id；请从已提交订单卡片点击取消。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+  }
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_cancel_order', requestArgs);
+    results.push(rideCancelOrderResult(payload, requestArgs, routeContext));
+  } catch (error) {
+    results.push(rideErrorResult('滴滴', 'ride.order.cancel', '滴滴取消订单失败', describeThrown(error)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', results);
+}
+
+async function callLocalDidiRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const requestArgs = rideDidiDriverLocationArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法调用滴滴 MCP 司机位置接口。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  }
+  if (requestArgs.order_id.length === 0) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '缺少订单号', '刷新滴滴司机位置需要 order_id；请从订单卡片点击刷新。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+  }
+  try {
+    const payload = await callRideMcpTool('滴滴', rideDidiOrderMcpUrl(), 'taxi_get_driver_location', requestArgs);
+    results.push(rideDriverLocationResult(payload, requestArgs, routeContext));
+  } catch (error) {
+    results.push(rideErrorResult('滴滴', 'ride.driver.location', '滴滴刷新司机位置失败', describeThrown(error)));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', results);
+}
+
+async function callLocalMockRideEstimate(surfaceId: string, toolId: string, args: Object | null): Promise<string> {
+  const route = rideRouteFromArgs(args);
+  if (route.origin.length === 0 || route.destination.length === 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      rideErrorResult('模拟打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；模拟数据也需要明确路线。')
+    ]);
+  }
+  const originPoint = rideMockPoint(route.origin, '114.066231,22.657805');
+  const destinationPoint = rideMockPoint(route.destination, '114.060432,22.548829');
+  const traceId = rideMockTraceId(originPoint, destinationPoint);
+  const estimatePayload = rideMockEstimatePayload(traceId);
+  const results: DynamicGenericToolResult[] = [
+    rideEstimateResult(originPoint, destinationPoint, estimatePayload)
+  ];
+  if (toolId === 'ride.app.link' || toolId === 'ride.estimate') {
+    results.push(rideLinkResult(
+      route.origin,
+      route.destination,
+      'diditaxi://mock/ride?traceId=' + encodeURIComponent(traceId),
+      'amapuri://mock/taxi?sourceApplication=aiphone',
+      originPoint.location,
+      destinationPoint.location
+    ));
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, results);
+}
+
+async function callLocalMockRideCreateOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const results: DynamicGenericToolResult[] = [];
+  const parsed = rideOrderArgs(args);
+  const requestArgs = rideDidiCreateOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (!rideOrderConfirmed(parsed)) {
+    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '需要明确确认车型', '请先查看模拟价格预估，并明确点击某个车型的确认叫车按钮。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  if (requestArgs.product_category.length === 0 || requestArgs.estimate_trace_id.length === 0) {
+    results.push(rideErrorResult('模拟滴滴', 'ride.order.create', '缺少下单参数', '模拟下单需要 product_category 和 estimate_trace_id；请从价格预估卡片选择车型。'));
+    return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+  }
+  const payload = rideMockOrderPayload(requestArgs);
+  const createResult = rideCreateOrderResult(payload, requestArgs, routeContext);
+  results.push(createResult);
+  const orderId = rideOrderPayloadText(payload, ['orderId', 'order_id', 'oid']);
+  if (orderId.length > 0) {
+    const driverLocationArgs: RideDidiDriverLocationArgs = { order_id: orderId };
+    results.push(rideDriverLocationResult(rideMockDriverPayload(driverLocationArgs), driverLocationArgs, routeContext));
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.create', results);
+}
+
+async function callLocalMockRideCancelOrder(surfaceId: string, args: Object | null): Promise<string> {
+  const requestArgs = rideDidiCancelOrderArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (requestArgs.order_id.length === 0) {
+    return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', [
+      rideErrorResult('模拟滴滴', 'ride.order.cancel', '缺少订单号', '取消模拟订单需要 order_id；请从订单卡片点击取消。')
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.order.cancel', [
+    rideCancelOrderResult(rideMockCancelPayload(), requestArgs, routeContext)
+  ]);
+}
+
+async function callLocalMockRideDriverLocation(surfaceId: string, args: Object | null): Promise<string> {
+  const requestArgs = rideDidiDriverLocationArgs(args);
+  const routeContext = rideOrderRouteContext(args);
+  if (requestArgs.order_id.length === 0) {
+    return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+      rideErrorResult('模拟滴滴', 'ride.driver.location', '缺少订单号', '刷新模拟司机位置需要 order_id；请从订单卡片点击刷新。')
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'ride.driver.location', [
+    rideDriverLocationResult(rideMockDriverPayload(requestArgs), requestArgs, routeContext)
+  ]);
+}
+
+async function callLocalRideTool(toolId: string, _prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'ride.order.create') {
+    return rideMockEnabled() ? callLocalMockRideCreateOrder(surfaceId, args) : callLocalDidiRideCreateOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.order.cancel') {
+    return rideMockEnabled() ? callLocalMockRideCancelOrder(surfaceId, args) : callLocalDidiRideCancelOrder(surfaceId, args);
+  }
+  if (toolId === 'ride.driver.location') {
+    return rideMockEnabled() ? callLocalMockRideDriverLocation(surfaceId, args) : callLocalDidiRideDriverLocation(surfaceId, args);
+  }
+  if (rideMockEnabled() && (toolId === 'ride.estimate' || toolId === 'ride.app.link')) {
+    return callLocalMockRideEstimate(surfaceId, toolId, args);
+  }
+  const route = rideRouteFromArgs(args);
+  if (route.origin.length === 0 || route.destination.length === 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      rideErrorResult('打车', toolId, '需要补充起点和终点', '请同时提供打车起点和终点；AIPhone 不会使用记忆坐标或猜测坐标。')
+    ]);
+  }
+  const results: DynamicGenericToolResult[] = [];
+  const didiKey = localProviderConfig.didiMcpKey.trim();
+  const amapMcpKey = localProviderConfig.amapMcpKey.trim();
+  const amapGeocodeKey = rideAmapGeocodeKey();
+  let originPoint: RidePoint | null = null;
+  let destinationPoint: RidePoint | null = null;
+  let amapOriginPoint: RidePoint | null = null;
+  let amapDestinationPoint: RidePoint | null = null;
+  let didiLink = '';
+  let amapLink = '';
+  let didiUrl = '';
+  let amapResolveError = '';
+  if (amapGeocodeKey.length > 0) {
+    try {
+      amapOriginPoint = await resolveAmapRidePoint(route.origin, route.city, amapGeocodeKey);
+      amapDestinationPoint = await resolveAmapRidePoint(route.destination, route.city, amapGeocodeKey);
+    } catch (error) {
+      amapResolveError = describeThrown(error);
+    }
+  }
+  const didiCity = rideDidiCityFromRouteOrAmap(route.city, amapOriginPoint, amapDestinationPoint);
+  if (didiKey.length === 0) {
+    results.push(rideErrorResult('滴滴', toolId, '缺少滴滴 MCP Key', '缺少 DIDI_MCP_KEY，无法获取滴滴价格预估或滴滴 App 打车链接。'));
+  } else if (didiCity.length === 0) {
+    results.push(rideErrorResult('滴滴', toolId, '需要补充城市', '请提供起终点所在城市，或确保高德地理编码可返回城市；滴滴 maps_textsearch 要求 city 参数，AIPhone 不会猜测城市或坐标。'));
+  } else {
+    try {
+      didiUrl = rideDidiQueryMcpUrl();
+      originPoint = await resolveDidiRidePoint(didiUrl, route.origin, didiCity);
+      destinationPoint = await resolveDidiRidePoint(didiUrl, route.destination, didiCity);
+    } catch (error) {
+      results.push(rideErrorResult('滴滴', toolId, '滴滴 MCP 调用失败', describeThrown(error)));
+    }
+    if (originPoint !== null && destinationPoint !== null) {
+      if (toolId === 'ride.estimate') {
+        try {
+          const estimatePayload = await callRideMcpTool('滴滴', didiUrl, 'taxi_estimate', rideDidiRequestArgs(originPoint, destinationPoint, true));
+          results.push(rideEstimateResult(originPoint, destinationPoint, estimatePayload));
+        } catch (error) {
+          results.push(rideErrorResult('滴滴', toolId, '滴滴价格预估失败', describeThrown(error)));
+        }
+      }
+      try {
+        const didiPayload = await callRideMcpTool('滴滴', didiUrl, 'taxi_generate_ride_app_link', rideDidiRequestArgs(originPoint, destinationPoint, false));
+        didiLink = rideLinkFromPayload(didiPayload);
+      } catch (error) {
+        if (rideShouldSurfaceAppLinkError(toolId)) {
+          results.push(rideErrorResult('滴滴', 'ride.app.link', '滴滴唤端链接生成失败', describeThrown(error)));
+        } else {
+          aiLogInfo('[AIPhone][RideOptionalAppLinkIgnored] provider=滴滴 tool=taxi_generate_ride_app_link error=' + describeThrown(error));
+        }
+      }
+    }
+  }
+  if (amapMcpKey.length > 0) {
+    try {
+      if (amapResolveError.length > 0) {
+        throw new Error(amapResolveError);
+      }
+      if (amapOriginPoint === null || amapDestinationPoint === null) {
+        throw new Error('高德 maps_schema_take_taxi 需要起终点经纬度；高德地理编码未返回完整坐标。');
+      }
+      const amapUrl = rideMcpUrlWithKey(localProviderConfig.amapMcpUrl, amapMcpKey);
+      const amapTool = await selectRideMcpToolName('高德', amapUrl, ['maps_schema_take_taxi', 'maps_taxi', 'taxi', 'ride_hailing', 'amap_taxi'], ['打车', 'taxi', 'ride']);
+      const amapArgs = rideAmapRequestArgs(amapOriginPoint, amapDestinationPoint);
+      const amapPayload = await callRideMcpTool('高德', amapUrl, amapTool, amapArgs);
+      amapLink = rideLinkFromPayload(amapPayload);
+    } catch (error) {
+      if (rideShouldSurfaceAppLinkError(toolId)) {
+        results.push(rideErrorResult('高德', 'ride.app.link', '高德打车唤端链接生成失败', describeThrown(error)));
+      } else {
+        aiLogInfo('[AIPhone][RideOptionalAppLinkIgnored] provider=高德 tool=maps_schema_take_taxi error=' + describeThrown(error));
+      }
+    }
+  }
+  if (didiLink.length > 0 || amapLink.length > 0 || toolId === 'ride.app.link') {
+    const originLocation = originPoint !== null ? originPoint.location : (amapOriginPoint !== null ? amapOriginPoint.location : '');
+    const destinationLocation = destinationPoint !== null ? destinationPoint.location : (amapDestinationPoint !== null ? amapDestinationPoint.location : '');
+    results.push(rideLinkResult(route.origin, route.destination, didiLink, amapLink, originLocation, destinationLocation));
+  }
+  return genericToolResultsA2ui(surfaceId, toolId, results);
 }
 
 function build12306LeftTicketUrl(path: string, date: string, fromCode: string, toCode: string): string {
@@ -2233,9 +4400,6 @@ function filterHighSpeed(source: string, trains: A2uiTrainData[]): A2uiTrainData
 }
 
 function intentForTool(toolId: string): string {
-  if (toolId === 'social.reply.send') {
-    return 'social';
-  }
   if (toolId === 'food.search') {
     return 'food';
   }
@@ -2246,9 +4410,6 @@ function intentForTool(toolId: string): string {
 }
 
 function componentForTool(toolId: string): string {
-  if (toolId === 'social.reply.send') {
-    return 'SocialInbox';
-  }
   if (toolId === 'travel.search') {
     return 'TravelOptions';
   }
@@ -2265,9 +4426,6 @@ function componentForTool(toolId: string): string {
 }
 
 function dataPathForTool(toolId: string): string {
-  if (toolId === 'social.reply.send') {
-    return '/social/messages';
-  }
   if (toolId === 'travel.search') {
     return '/travelOptions';
   }
@@ -2284,9 +4442,6 @@ function dataPathForTool(toolId: string): string {
 }
 
 function dataLabelForTool(toolId: string): string {
-  if (toolId === 'social.reply.send') {
-    return 'social';
-  }
   if (toolId === 'travel.search') {
     return 'travelOptions';
   }
@@ -2303,9 +4458,6 @@ function dataLabelForTool(toolId: string): string {
 }
 
 function titleForTool(toolId: string): string {
-  if (toolId === 'social.reply.send') {
-    return '微信回复发送';
-  }
   if (toolId === 'travel.search') {
     return '出行方案查询';
   }
@@ -3393,6 +5545,54 @@ function inferAmapCityFromPlace(place: string): string {
   return match === null ? '' : match[1];
 }
 
+function emptyAmapLocationResolution(source: string = 'none'): AmapLocationResolution {
+  return { location: '', locationSource: source, locationLabel: '', city: '' };
+}
+
+function rideDidiCityText(city: string): string {
+  const trimmed = city.trim();
+  if (trimmed === '[]') {
+    return '';
+  }
+  if (trimmed.length > 1 && trimmed.endsWith('市')) {
+    return trimmed.substring(0, trimmed.length - 1);
+  }
+  return trimmed;
+}
+
+function amapScalarText(value: Object | string | number | boolean | null | undefined): string {
+  if (Array.isArray(value)) {
+    return '';
+  }
+  return textOf(value).trim();
+}
+
+function amapResolutionCityFromGeocode(first: AmapGeocode): string {
+  const city = amapScalarText(first.city);
+  return city.length > 0 ? city : amapScalarText(first.province);
+}
+
+function amapResolutionCityFromPoi(first: AmapPoi): string {
+  return firstText([first.cityname, first.pname]).trim();
+}
+
+function amapResolutionFromGeocodePayload(payload: AmapPayload): AmapLocationResolution {
+  if (textOf(payload.status) !== '1') {
+    return emptyAmapLocationResolution();
+  }
+  const geocodes = payload.geocodes === undefined ? [] : payload.geocodes;
+  if (geocodes.length === 0) {
+    return emptyAmapLocationResolution();
+  }
+  const first = geocodes[0];
+  return {
+    location: textOf(first.location),
+    locationSource: 'geocode',
+    locationLabel: firstText([first.formatted_address, first.level]),
+    city: amapResolutionCityFromGeocode(first)
+  };
+}
+
 function isLandmarkPlace(place: string): boolean {
   return /华为|基地|园区|总部|云谷|大学|医院|站|广场|大厦|小区/u.test(place);
 }
@@ -3405,36 +5605,24 @@ async function amapJsonGet(url: string): Promise<AmapPayload> {
   return JSON.parse(response.text) as AmapPayload;
 }
 
-async function geocodeAmapAddress(address: string, key: string): Promise<AmapLocationResolution> {
+async function geocodeAmapAddress(address: string, key: string, cityHint: string = ''): Promise<AmapLocationResolution> {
   const trimmed = address.trim();
   if (trimmed.length === 0 || key.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
-  const city = inferAmapCityFromPlace(trimmed);
+  const city = cityHint.trim().length > 0 ? cityHint.trim() : inferAmapCityFromPlace(trimmed);
   const payload = await amapJsonGet(buildQueryUrl(
     'https://restapi.amap.com/v3/geocode/geo',
     ['key', 'address', 'city'],
     [key, trimmed, city]
   ));
-  if (textOf(payload.status) !== '1') {
-    return { location: '', locationSource: 'none', locationLabel: '' };
-  }
-  const geocodes = payload.geocodes === undefined ? [] : payload.geocodes;
-  if (geocodes.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
-  }
-  const first = geocodes[0];
-  return {
-    location: textOf(first.location),
-    locationSource: 'geocode',
-    locationLabel: firstText([first.formatted_address, first.level])
-  };
+  return amapResolutionFromGeocodePayload(payload);
 }
 
 async function searchAmapPoiLocation(keywords: string, city: string, key: string): Promise<AmapLocationResolution> {
   const trimmed = keywords.trim();
   if (trimmed.length === 0 || key.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const payload = await amapJsonGet(buildQueryUrl(
     'https://restapi.amap.com/v3/place/text',
@@ -3442,17 +5630,18 @@ async function searchAmapPoiLocation(keywords: string, city: string, key: string
     [key, trimmed, city, '5', '1']
   ));
   if (textOf(payload.status) !== '1') {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const pois = payload.pois === undefined ? [] : payload.pois;
   if (pois.length === 0) {
-    return { location: '', locationSource: 'none', locationLabel: '' };
+    return emptyAmapLocationResolution();
   }
   const first = pois[0];
   return {
     location: textOf(first.location),
     locationSource: 'poi_text',
-    locationLabel: firstText([first.name, first.address])
+    locationLabel: firstText([first.name, first.address]),
+    city: amapResolutionCityFromPoi(first)
   };
 }
 
@@ -3472,7 +5661,7 @@ async function resolveFoodSearchLocation(place: string, key: string): Promise<Am
   if (poi.location.length > 0) {
     return poi;
   }
-  return { location: '', locationSource: 'none', locationLabel: '' };
+  return emptyAmapLocationResolution();
 }
 
 function foodRecordForA2ui(item: AmapPoi): A2uiFoodData {
@@ -4079,6 +6268,545 @@ function selectedLuckinAttrs(attrs: LuckinProductAttr[] | undefined): string {
   return parts.join(' · ');
 }
 
+function luckinAttrSelectionsMapFromProduct(product: LuckinProductRecord): Record<string, string> {
+  const result: Record<string, string> = {};
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    const groupName = textOf(attr.attributeName).trim();
+    if (groupName.length === 0) {
+      continue;
+    }
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        const choiceName = textOf(child.attributeName).trim();
+        if (choiceName.length > 0) {
+          result[groupName] = choiceName;
+        }
+      }
+    }
+  }
+  return result;
+}
+
+function luckinAttrOptionRowsFromSelections(selections: string[][]): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [];
+  for (let index = 0; index < selections.length; index += 1) {
+    const groupName = selections[index][0];
+    const choiceName = selections[index][1];
+    if (groupName.length > 0 && choiceName.length > 0) {
+      rows.push({ label: '选项·' + groupName, value: choiceName + ':1' });
+    }
+  }
+  return rows;
+}
+
+function luckinAttrOptionRows(product: LuckinProductRecord): A2uiLabelValueData[] {
+  const rows: A2uiLabelValueData[] = [];
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index++) {
+    const attr = attrs[index];
+    const groupName = textOf(attr.attributeName);
+    if (groupName.length === 0) {
+      continue;
+    }
+    const parts: string[] = [];
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      const choiceName = textOf(child.attributeName);
+      if (choiceName.length === 0) {
+        continue;
+      }
+      const canSelected = child.canSelected;
+      if (canSelected !== undefined && canSelected !== null && Number(canSelected) === 0) {
+        continue;
+      }
+      parts.push(choiceName + ':' + (child.selected === true ? '1' : '0'));
+    }
+    if (parts.length > 0) {
+      rows.push({ label: '选项·' + groupName, value: parts.join('|') });
+    }
+  }
+  return rows;
+}
+
+function luckinApplySelectedChoices(
+  detailAttrs: LuckinProductAttr[] | undefined,
+  searchAttrs: LuckinProductAttr[] | undefined
+): LuckinProductAttr[] | undefined {
+  if (detailAttrs === undefined || detailAttrs.length === 0) {
+    return searchAttrs;
+  }
+  const selectedByGroup: string[] = [];
+  if (searchAttrs !== undefined) {
+    for (let searchIndex = 0; searchIndex < searchAttrs.length; searchIndex++) {
+      const searchAttr = searchAttrs[searchIndex];
+      const groupName = textOf(searchAttr.attributeName);
+      const children = searchAttr.productSubAttrs === undefined ? [] : searchAttr.productSubAttrs;
+      for (let childIndex = 0; childIndex < children.length; childIndex++) {
+        const child = children[childIndex];
+        if (child.selected === true) {
+          selectedByGroup.push(groupName + '|' + textOf(child.attributeName));
+        }
+      }
+    }
+  }
+  const merged: LuckinProductAttr[] = [];
+  for (let detailIndex = 0; detailIndex < detailAttrs.length; detailIndex++) {
+    const detailAttr = detailAttrs[detailIndex];
+    const groupName = textOf(detailAttr.attributeName);
+    const children = detailAttr.productSubAttrs === undefined ? [] : detailAttr.productSubAttrs;
+    let selectedChoice = '';
+    for (let mapIndex = 0; mapIndex < selectedByGroup.length; mapIndex++) {
+      const parts = selectedByGroup[mapIndex].split('|');
+      if (parts.length === 2 && parts[0] === groupName) {
+        selectedChoice = parts[1];
+      }
+    }
+    const mergedChildren: LuckinProductSubAttr[] = [];
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      const choiceName = textOf(child.attributeName);
+      const selected = selectedChoice.length > 0 ?
+        choiceName === selectedChoice :
+        child.selected === true;
+      mergedChildren.push({
+        attributeName: child.attributeName,
+        selected: selected,
+        canSelected: child.canSelected
+      });
+    }
+    merged.push({
+      attributeName: detailAttr.attributeName,
+      productSubAttrs: mergedChildren
+    });
+  }
+  return merged;
+}
+
+function luckinProductForPreview(searchProduct: LuckinProductRecord, detailProduct: LuckinProductRecord | null): LuckinProductRecord {
+  if (detailProduct === null) {
+    return searchProduct;
+  }
+  return {
+    productId: firstText([searchProduct.productId, detailProduct.productId]),
+    productName: firstText([searchProduct.productName, detailProduct.productName]),
+    name: firstText([searchProduct.name, detailProduct.name]),
+    skuCode: firstText([searchProduct.skuCode, detailProduct.skuCode]),
+    pictureUrl: firstText([searchProduct.pictureUrl, detailProduct.pictureUrl]),
+    price: firstText([detailProduct.price, searchProduct.price]),
+    discountPrice: firstText([detailProduct.discountPrice, searchProduct.discountPrice]),
+    initPrice: firstText([detailProduct.initPrice, searchProduct.initPrice]),
+    productAttrs: luckinApplySelectedChoices(detailProduct.productAttrs, searchProduct.productAttrs),
+    tags: detailProduct.tags !== undefined ? detailProduct.tags : searchProduct.tags
+  };
+}
+
+function luckinProductSearchQuery(prompt: string, request: LuckinOrderActionArgs): string {
+  const previewPrompt = textOf(request.previewPrompt).trim();
+  if (previewPrompt.length > 0) {
+    return previewPrompt;
+  }
+  return luckinPromptKeyword(prompt);
+}
+
+function luckinApplyAttrChoice(
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string
+): LuckinProductRecord {
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  const merged: LuckinProductAttr[] = [];
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    const name = textOf(attr.attributeName);
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    const mergedChildren: LuckinProductSubAttr[] = [];
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      const childName = textOf(child.attributeName);
+      const selected = name === groupName ? childName === choiceName : child.selected === true;
+      mergedChildren.push({
+        attributeId: child.attributeId,
+        attributeName: child.attributeName,
+        selected: selected,
+        canSelected: child.canSelected,
+        price: child.price
+      });
+    }
+    merged.push({
+      attributeId: attr.attributeId,
+      attributeName: attr.attributeName,
+      productSubAttrs: mergedChildren
+    });
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: product.skuCode,
+    pictureUrl: product.pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: merged,
+    tags: product.tags
+  };
+}
+
+function luckinAttrSelectionsFromRequest(request: LuckinOrderActionArgs): string[][] {
+  const raw = request.attrSelections;
+  if (raw === undefined || raw === null || typeof raw !== 'object') {
+    return [];
+  }
+  const pairs: string[][] = [];
+  const keys = Object.keys(raw as Record<string, Object | string | number | boolean | null | undefined>);
+  for (let index = 0; index < keys.length; index += 1) {
+    const groupName = textOf(keys[index]).trim();
+    const choiceName = textOf((raw as Record<string, Object | string | number | boolean | null | undefined>)[keys[index]]).trim();
+    if (groupName.length > 0 && choiceName.length > 0) {
+      pairs.push([groupName, choiceName]);
+    }
+  }
+  return pairs;
+}
+
+function luckinApplyAttrSelections(
+  product: LuckinProductRecord,
+  selections: string[][],
+  skipGroup: string = ''
+): LuckinProductRecord {
+  let result = product;
+  for (let index = 0; index < selections.length; index += 1) {
+    const groupName = selections[index][0];
+    const choiceName = selections[index][1];
+    if (groupName === skipGroup) {
+      continue;
+    }
+    result = luckinApplyAttrChoice(result, groupName, choiceName);
+  }
+  return result;
+}
+
+function luckinPinnedProductPicture(
+  request: LuckinOrderActionArgs,
+  product: LuckinProductRecord,
+  detailProduct?: LuckinProductRecord
+): string {
+  const fromRequest = textOf(request.pictureUrl);
+  if (fromRequest.length > 0) {
+    return fromRequest;
+  }
+  const fromDetail = detailProduct !== undefined ? luckinProductPictureUrl(detailProduct) : '';
+  if (fromDetail.length > 0) {
+    return fromDetail;
+  }
+  return luckinProductPictureUrl(product);
+}
+
+function luckinProductWithPicture(product: LuckinProductRecord, pictureUrl: string): LuckinProductRecord {
+  if (pictureUrl.length === 0) {
+    return product;
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: product.skuCode,
+    pictureUrl: pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: product.productAttrs,
+    tags: product.tags
+  };
+}
+
+function luckinProductWithSku(product: LuckinProductRecord, skuCode: string): LuckinProductRecord {
+  if (skuCode.length === 0) {
+    return product;
+  }
+  return {
+    productId: product.productId,
+    productName: product.productName,
+    name: product.name,
+    skuCode: skuCode,
+    pictureUrl: product.pictureUrl,
+    price: product.price,
+    discountPrice: product.discountPrice,
+    initPrice: product.initPrice,
+    productAttrs: product.productAttrs,
+    tags: product.tags
+  };
+}
+
+function luckinRestoreProductSelectionsFast(
+  request: LuckinOrderActionArgs,
+  detailProduct: LuckinProductRecord
+): LuckinProductRecord {
+  const selections = luckinAttrSelectionsFromRequest(request);
+  const skipGroup = textOf(request.attrGroup);
+  let product = luckinApplyAttrSelections(detailProduct, selections, skipGroup);
+  return luckinProductWithSku(product, textOf(request.skuCode));
+}
+
+function luckinFinalizeSwitchedProduct(
+  detailProduct: LuckinProductRecord,
+  switched: LuckinProductRecord,
+  selections: string[][],
+  groupName: string,
+  choiceName: string
+): LuckinProductRecord {
+  const attrSource = switched.productAttrs !== undefined && switched.productAttrs.length > 0 ?
+    switched.productAttrs :
+    detailProduct.productAttrs;
+  let product: LuckinProductRecord = {
+    productId: firstText([switched.productId, detailProduct.productId]),
+    productName: firstText([switched.productName, detailProduct.productName]),
+    name: firstText([switched.name, detailProduct.name]),
+    skuCode: firstText([switched.skuCode, detailProduct.skuCode]),
+    pictureUrl: firstText([detailProduct.pictureUrl, switched.pictureUrl]),
+    price: firstText([switched.price, detailProduct.price]),
+    discountPrice: firstText([switched.discountPrice, detailProduct.discountPrice]),
+    initPrice: firstText([switched.initPrice, detailProduct.initPrice]),
+    productAttrs: attrSource,
+    tags: switched.tags !== undefined ? switched.tags : detailProduct.tags
+  };
+  product = luckinApplyAttrSelections(product, selections, '');
+  if (groupName.length > 0 && choiceName.length > 0) {
+    product = luckinApplyAttrChoice(product, groupName, choiceName);
+    product = luckinProductWithSku(product, firstText([switched.skuCode, product.skuCode]));
+  }
+  return product;
+}
+
+const luckinProductDetailCache: Map<string, LuckinProductRecord> = new Map();
+
+function luckinDetailCacheKey(deptId: string, productId: number): string {
+  return deptId + '|' + productId.toString();
+}
+
+async function luckinLoadProductDetailCached(
+  shop: LuckinShopRecord,
+  productId: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const deptId = textOf(shop.deptId);
+  const cacheKey = luckinDetailCacheKey(deptId, productId);
+  const cached = luckinProductDetailCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const detailProduct = await luckinLoadProductDetail(shop, productId, token);
+  if (detailProduct !== null) {
+    luckinProductDetailCache.set(cacheKey, detailProduct);
+  }
+  return detailProduct;
+}
+
+function luckinFindAttrIds(
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string
+): LuckinAttrOperationParam | null {
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index += 1) {
+    const attr = attrs[index];
+    if (textOf(attr.attributeName) !== groupName) {
+      continue;
+    }
+    const groupAttrId = Number(attr.attributeId);
+    if (groupAttrId <= 0) {
+      continue;
+    }
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+      const child = children[childIndex];
+      if (textOf(child.attributeName) !== choiceName) {
+        continue;
+      }
+      const choiceAttrId = Number(child.attributeId);
+      if (choiceAttrId <= 0) {
+        continue;
+      }
+      return {
+        attributeId: groupAttrId,
+        subAttr: {
+          attributeId: choiceAttrId,
+          operation: 3
+        }
+      };
+    }
+  }
+  return null;
+}
+
+async function luckinTrySwitchProduct(
+  shop: LuckinShopRecord,
+  product: LuckinProductRecord,
+  groupName: string,
+  choiceName: string,
+  quantity: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const attrOperationParam = luckinFindAttrIds(product, groupName, choiceName);
+  if (attrOperationParam === null) {
+    return null;
+  }
+  const deptId = Number(textOf(shop.deptId));
+  const productId = Number(textOf(product.productId));
+  const skuCode = luckinProductSku(product);
+  if (deptId <= 0 || productId <= 0 || skuCode.length === 0) {
+    return null;
+  }
+  try {
+    const switchArgs: LuckinSwitchProductArgs = {
+      deptId: deptId,
+      productId: productId,
+      skuCode: skuCode,
+      attrOperationParam: attrOperationParam,
+      amount: quantity
+    };
+    const switchPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'switchProduct',
+      switchArgs
+    );
+    const switchedProducts = luckinProductsFromPayload(switchPayload);
+    if (switchedProducts.length === 0) {
+      return null;
+    }
+    return switchedProducts[0];
+  } catch (error) {
+    aiLogInfo('[AIPhone][LuckinSwitchProduct] fallback=' + describeThrown(error));
+    return null;
+  }
+}
+
+async function luckinLoadProductDetail(
+  shop: LuckinShopRecord,
+  productId: number,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const deptId = Number(textOf(shop.deptId));
+  if (deptId <= 0 || productId <= 0) {
+    return null;
+  }
+  try {
+    const detailArgs: LuckinProductDetailArgs = {
+      deptId: deptId,
+      productId: productId
+    };
+    const detailPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'queryProductDetailInfo',
+      detailArgs
+    );
+    const detailProducts = luckinProductsFromPayload(detailPayload);
+    return detailProducts.length > 0 ? detailProducts[0] : null;
+  } catch (error) {
+    aiLogInfo('[AIPhone][LuckinProductDetail] fallback=' + describeThrown(error));
+    return null;
+  }
+}
+
+async function luckinLoadProductForOptionSwitch(
+  shop: LuckinShopRecord,
+  request: LuckinOrderActionArgs,
+  prompt: string,
+  token: string
+): Promise<LuckinProductRecord | null> {
+  const productId = Number(textOf(request.productId));
+  const quantity = luckinQuantityFromPrompt(prompt);
+  const groupName = textOf(request.attrGroup);
+  const choiceName = textOf(request.attrChoice);
+  const selections = luckinAttrSelectionsFromRequest(request);
+  const detailProduct = await luckinLoadProductDetailCached(shop, productId, token);
+  if (detailProduct === null) {
+    return null;
+  }
+  let product = luckinRestoreProductSelectionsFast(request, detailProduct);
+  if (groupName.length > 0 && choiceName.length > 0) {
+    const switched = await luckinTrySwitchProduct(shop, product, groupName, choiceName, quantity, token);
+    if (switched !== null) {
+      product = luckinFinalizeSwitchedProduct(detailProduct, switched, selections, groupName, choiceName);
+    } else {
+      product = luckinApplyAttrSelections(product, selections, '');
+    }
+  }
+  const pinnedPicture = luckinPinnedProductPicture(request, product, detailProduct);
+  return luckinProductWithPicture(product, pinnedPicture);
+}
+
+async function luckinLoadProductForPreview(
+  shop: LuckinShopRecord,
+  searchProduct: LuckinProductRecord,
+  token: string
+): Promise<LuckinProductRecord> {
+  const deptId = Number(textOf(shop.deptId));
+  const productId = Number(textOf(searchProduct.productId));
+  if (deptId <= 0 || productId <= 0) {
+    return searchProduct;
+  }
+  try {
+    const detailArgs: LuckinProductDetailArgs = {
+      deptId: deptId,
+      productId: productId
+    };
+    const detailPayload = await callReadonlyBrandMcpTool(
+      '瑞幸',
+      localProviderConfig.luckinMcpUrl,
+      token,
+      'queryProductDetailInfo',
+      detailArgs
+    );
+    const detailProducts = luckinProductsFromPayload(detailPayload);
+    const detailProduct = detailProducts.length > 0 ? detailProducts[0] : null;
+    return luckinProductForPreview(searchProduct, detailProduct);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : JSON.stringify(error);
+    aiLogInfo('[AIPhone][LuckinProductDetail] fallback=search reason=' + message);
+    return searchProduct;
+  }
+}
+
+function luckinPreviewPromptFromProduct(prompt: string, product: LuckinProductRecord, quantity: number): string {
+  const parts: string[] = [];
+  const productName = luckinProductName(product);
+  if (productName.length > 0) {
+    parts.push(productName + (quantity > 1 ? ' x' + quantity.toString() : ''));
+  }
+  const attrs = product.productAttrs === undefined ? [] : product.productAttrs;
+  for (let index = 0; index < attrs.length; index++) {
+    const attr = attrs[index];
+    const children = attr.productSubAttrs === undefined ? [] : attr.productSubAttrs;
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      if (child.selected === true) {
+        const choiceName = textOf(child.attributeName);
+        if (choiceName.length > 0) {
+          parts.push(choiceName);
+        }
+      }
+    }
+  }
+  const remark = luckinRemarkFromPrompt(prompt);
+  if (remark.length > 0) {
+    parts.push(remark);
+  }
+  if (parts.length > 0) {
+    return parts.join('，');
+  }
+  return prompt;
+}
+
 function luckinProductToFood(item: LuckinProductRecord): A2uiFoodData {
   return {
     name: '瑞幸 · ' + firstText([item.productName, item.name]),
@@ -4150,6 +6878,792 @@ export function foodRecordsFromLuckinMcpTool(toolName: string, value: Object): A
     return luckinOrderToFood(data as LuckinOrderRecord);
   }
   return [];
+}
+
+interface LuckinOrderActionArgs {
+  deptId?: string | number;
+  deptName?: string;
+  address?: string;
+  distance?: string;
+  location?: string;
+  status?: string;
+  productId?: string | number;
+  productName?: string;
+  skuCode?: string;
+  pictureUrl?: string;
+  previewPrompt?: string;
+  attrGroup?: string;
+  attrChoice?: string;
+  attrSelections?: Record<string, string | number | boolean | Object>;
+  quantity?: string | number;
+  price?: string | number;
+  couponCodeList?: string[];
+  remark?: string;
+  orderId?: string | number;
+  payOrderUrl?: string;
+  payOrderQrCodeUrl?: string;
+}
+
+function luckinActionArgs(args: Object | null): LuckinOrderActionArgs {
+  return args === null ? {} : args as LuckinOrderActionArgs;
+}
+
+function luckinMoney(value: Object | string | number | boolean | null | undefined): string {
+  const raw = textOf(value).trim();
+  if (raw.length === 0) {
+    return '';
+  }
+  return raw.charAt(0) === '¥' ? raw : '¥' + raw;
+}
+
+function luckinPromptKeyword(prompt: string): string {
+  const preset = /(生椰拿铁|冰美式|拿铁|美式|葡萄冰萃|澳瑞白|厚乳拿铁|橙C美式|椰云拿铁|丝绒拿铁)/u.exec(prompt);
+  if (preset !== null) {
+    return preset[0];
+  }
+  const cleaned = prompt
+    .replace(/瑞幸|luckin|ruixing/ig, '')
+    .replace(/帮我|请|来|点|下一杯|下单|咖啡|饮品|一杯|两杯|2杯|杯|自取|外送|配送|附近|门店|使用优惠券|用优惠券/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : '生椰拿铁';
+}
+
+function luckinQuantityFromPrompt(prompt: string): number {
+  if (/两杯|2杯|两份|2份/.test(prompt)) {
+    return 2;
+  }
+  const match = /(\d+)\s*(杯|份)/.exec(prompt);
+  if (match !== null) {
+    const count = Number(match[1]);
+    return count > 0 && count < 10 ? count : 1;
+  }
+  return 1;
+}
+
+function luckinRemarkFromPrompt(prompt: string): string {
+  const remarks: string[] = [];
+  ['无糖', '少少甜', '少甜', '半糖', '标准甜', '热饮', '热', '少冰', '去冰', '正常冰', '多冰', '少奶', '加奶'].forEach((word: string) => {
+    if (prompt.indexOf(word) >= 0 && remarks.indexOf(word) < 0) {
+      remarks.push(word);
+    }
+  });
+  return remarks.join('，');
+}
+
+function luckinProductName(item: LuckinProductRecord): string {
+  return firstText([item.productName, item.name]);
+}
+
+function luckinProductSku(item: LuckinProductRecord): string {
+  return firstText([item.skuCode]);
+}
+
+function luckinProductPictureUrl(item: LuckinProductRecord): string {
+  return firstText([item.pictureUrl]);
+}
+
+function luckinProductsFromPayload(payload: Object): LuckinProductRecord[] {
+  const data = mcpPayloadData(payload as LuckinPayload);
+  if (data === undefined) {
+    return [];
+  }
+  const products = luckinProductsFromData(data as LuckinProductRecord[] | LuckinProductContainer | undefined);
+  if (products.length > 0) {
+    return products;
+  }
+  const item = data as LuckinProductRecord;
+  return luckinProductName(item).length > 0 ? [item] : [];
+}
+
+function luckinOrderRecordFromPayload(payload: Object): LuckinOrderRecord {
+  const candidates = luckinOrderPayloadCandidates(payload);
+  const merged: LuckinOrderRecord = {};
+  let orderId = '';
+  let payOrderUrl = '';
+  let payOrderQrCodeUrl = '';
+  for (let index = 0; index < candidates.length; index += 1) {
+    const record = luckinOrderFieldsFromRecord(candidates[index]);
+    orderId = firstText([record.orderIdStr, record.orderId, orderId]);
+    payOrderUrl = firstText([record.payOrderUrl, payOrderUrl]);
+    payOrderQrCodeUrl = firstText([record.payOrderQrCodeUrl, payOrderQrCodeUrl]);
+    if (record.discountPrice !== undefined) {
+      merged.discountPrice = record.discountPrice;
+    }
+    if (record.totalInitialPrice !== undefined) {
+      merged.totalInitialPrice = record.totalInitialPrice;
+    }
+    if (record.privilegeMoney !== undefined) {
+      merged.privilegeMoney = record.privilegeMoney;
+    }
+    if (record.couponCodeList !== undefined) {
+      merged.couponCodeList = record.couponCodeList;
+    }
+    if (record.orderStatusName !== undefined) {
+      merged.orderStatusName = record.orderStatusName;
+    }
+    if (record.orderStatus !== undefined) {
+      merged.orderStatus = record.orderStatus;
+    }
+    if (record.takeMealTime !== undefined) {
+      merged.takeMealTime = record.takeMealTime;
+    }
+    if (record.aboutTime !== undefined) {
+      merged.aboutTime = record.aboutTime;
+    }
+  }
+  const deep = luckinDeepScanPayFields(payload);
+  orderId = firstText([orderId, deep.orderId]);
+  payOrderUrl = firstText([payOrderUrl, deep.payOrderUrl]);
+  payOrderQrCodeUrl = firstText([payOrderQrCodeUrl, deep.payOrderQrCodeUrl]);
+  if (orderId.length > 0) {
+    merged.orderIdStr = orderId;
+  }
+  if (payOrderUrl.length > 0) {
+    merged.payOrderUrl = payOrderUrl;
+  }
+  if (payOrderQrCodeUrl.length > 0) {
+    merged.payOrderQrCodeUrl = payOrderQrCodeUrl;
+  }
+  return merged;
+}
+
+function luckinOrderFieldsFromRecord(record: LuckinOrderRecord): LuckinOrderRecord {
+  const bag = record as LuckinOrderRecordAliases;
+  const normalized: LuckinOrderRecord = {
+    orderIdStr: firstText([record.orderIdStr, bag.order_id_str]),
+    orderId: firstText([record.orderId, bag.order_id, bag.order_no, bag.orderNo, record.tradeNo, bag.trade_no]),
+    payOrderUrl: firstText([record.payOrderUrl, bag.pay_order_url, bag.payUrl, bag.pay_url, bag.wechatPayUrl, bag.wechat_pay_url]),
+    payOrderQrCodeUrl: firstText([record.payOrderQrCodeUrl, bag.pay_order_qr_code_url, bag.qrCodeUrl, bag.qr_code_url]),
+    discountPrice: record.discountPrice,
+    totalInitialPrice: record.totalInitialPrice,
+    privilegeMoney: record.privilegeMoney,
+    couponCodeList: record.couponCodeList,
+    orderStatusName: record.orderStatusName,
+    orderStatus: record.orderStatus,
+    takeMealTime: record.takeMealTime,
+    aboutTime: record.aboutTime
+  };
+  return normalized;
+}
+
+function luckinDeepScanPayFields(root: Object): LuckinOrderActionArgs {
+  const found: LuckinOrderActionArgs = {};
+  const absorb = (record: LuckinOrderRecord | undefined): void => {
+    if (record === undefined) {
+      return;
+    }
+    const normalized = luckinOrderFieldsFromRecord(record);
+    if (textOf(found.orderId).length === 0) {
+      found.orderId = firstText([normalized.orderIdStr, normalized.orderId]);
+    }
+    if (textOf(found.payOrderUrl).length === 0) {
+      found.payOrderUrl = textOf(normalized.payOrderUrl);
+    }
+    if (textOf(found.payOrderQrCodeUrl).length === 0) {
+      found.payOrderQrCodeUrl = textOf(normalized.payOrderQrCodeUrl);
+    }
+  };
+  const bag = root as LuckinPayloadBag;
+  absorb(bag as LuckinOrderRecord);
+  absorb(bag.orderInfo);
+  absorb(bag.order);
+  absorb(bag.orderDetail);
+  absorb(bag.orderData);
+  absorb(bag.content);
+  const data = mcpPayloadData(bag);
+  if (data !== undefined && !Array.isArray(data)) {
+    absorb(data as LuckinOrderRecord);
+  }
+  if (textOf(found.payOrderUrl).length === 0) {
+    const preview = JSON.stringify(root);
+    const weixinMatch = /weixin:\/\/[^\s"']+/i.exec(preview);
+    if (weixinMatch !== null) {
+      found.payOrderUrl = weixinMatch[0];
+    }
+  }
+  return found;
+}
+
+function luckinPayloadErrorMessage(payload: Object): string {
+  const wrapped = payload as LuckinPayload;
+  const code = textOf(wrapped.code).trim();
+  if (code.length > 0 && code !== '0' && code !== '200' && code !== '0000') {
+    return firstText([wrapped.message, wrapped.msg, '瑞幸返回错误码 ' + code]);
+  }
+  if (wrapped.success === false || wrapped.success === 'false') {
+    return firstText([wrapped.message, wrapped.msg, '瑞幸创建订单失败']);
+  }
+  return '';
+}
+
+function luckinOrderPayloadCandidates(payload: Object): LuckinOrderRecord[] {
+  const wrapped = payload as LuckinPayloadBag;
+  const candidates: LuckinOrderRecord[] = [];
+  const push = (value: Object | undefined | null): void => {
+    if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+    candidates.push(value as LuckinOrderRecord);
+  };
+  const data = mcpPayloadData(wrapped);
+  push(data as Object);
+  push(payload);
+  push(wrapped.orderInfo as Object);
+  push(wrapped.order as Object);
+  push(wrapped.orderDetail as Object);
+  push(wrapped.orderData as Object);
+  push(wrapped.content as Object);
+  return candidates;
+}
+
+function luckinPayDiagnosticsLog(tag: string, orderId: string, payOrderUrl: string, payOrderQrCodeUrl: string, actionCount: number): void {
+  const hasPayOrderUrl = payOrderUrl.length > 0;
+  const hasPayOrderQrCodeUrl = payOrderQrCodeUrl.length > 0;
+  const hasPay = hasPayOrderUrl || hasPayOrderQrCodeUrl;
+  aiLogInfo('[AIPhone][' + tag + '] orderId=' + orderId +
+    ' hasPayOrderUrl=' + (hasPayOrderUrl ? 'true' : 'false') +
+    ' payOrderUrlChars=' + payOrderUrl.length.toString() +
+    ' hasPayOrderQrCodeUrl=' + (hasPayOrderQrCodeUrl ? 'true' : 'false') +
+    ' payOrderQrCodeUrlChars=' + payOrderQrCodeUrl.length.toString() +
+    ' hasPay=' + (hasPay ? 'true' : 'false') +
+    ' actionCount=' + actionCount.toString());
+}
+
+function luckinMcpPayFieldKeys(payload: Object): string {
+  const wrapped = payload as LuckinPayloadBag;
+  const data = mcpPayloadData(wrapped);
+  if (data !== undefined && !Array.isArray(data) && typeof data === 'object') {
+    const record = data as LuckinOrderRecord;
+    const keys: string[] = [];
+    if (record.orderId !== undefined) { keys.push('orderId'); }
+    if (record.orderIdStr !== undefined) { keys.push('orderIdStr'); }
+    if (record.payOrderUrl !== undefined) { keys.push('payOrderUrl'); }
+    if (record.payOrderQrCodeUrl !== undefined) { keys.push('payOrderQrCodeUrl'); }
+    if (record.discountPrice !== undefined) { keys.push('discountPrice'); }
+    if (record.orderStatusName !== undefined) { keys.push('orderStatusName'); }
+    return keys.join(',');
+  }
+  const keys: string[] = [];
+  if (wrapped.data !== undefined) { keys.push('data'); }
+  if (wrapped.result !== undefined) { keys.push('result'); }
+  if (wrapped.orderInfo !== undefined) { keys.push('orderInfo'); }
+  if (wrapped.order !== undefined) { keys.push('order'); }
+  if (wrapped.orderDetail !== undefined) { keys.push('orderDetail'); }
+  if (wrapped.orderData !== undefined) { keys.push('orderData'); }
+  if (wrapped.content !== undefined) { keys.push('content'); }
+  if (wrapped.code !== undefined) { keys.push('code'); }
+  if (wrapped.message !== undefined) { keys.push('message'); }
+  if (wrapped.msg !== undefined) { keys.push('msg'); }
+  if (wrapped.success !== undefined) { keys.push('success'); }
+  return keys.join(',');
+}
+
+function luckinShopName(shop: LuckinShopRecord): string {
+  return firstText([shop.deptName, shop.shopName, shop.storeName, shop.name, shop.title, shop.number]);
+}
+
+function luckinShopAddress(shop: LuckinShopRecord): string {
+  return firstText([shop.address, shop.deptAddress, shop.shopAddress]);
+}
+
+function luckinShopLocation(shop: LuckinShopRecord, fallback: string): string {
+  const longitude = firstText([shop.longitude, shop.lng]);
+  const latitude = firstText([shop.latitude, shop.lat]);
+  return longitude.length > 0 && latitude.length > 0 ? longitude + ',' + latitude : fallback;
+}
+
+function luckinShopStatus(shop: LuckinShopRecord): string {
+  const tags = shop.deptTags !== undefined ? shop.deptTags : (shop.tags !== undefined ? shop.tags : []);
+  for (let index = 0; index < tags.length; index++) {
+    const tag = textOf(tags[index]);
+    if (tag.indexOf('营业') >= 0 || tag.indexOf('自提') >= 0 || tag.indexOf('外送') >= 0) {
+      return tag;
+    }
+  }
+  if (textOf(shop.workTimeStart).length > 0 && textOf(shop.workTimeEnd).length > 0) {
+    return '营业中';
+  }
+  return '营业中';
+}
+
+export function resolveLuckinLocationForTest(requestLocation: string, prompt: string, defaultLocation: string): string {
+  const fromArgs = parseCoordinatePair(requestLocation);
+  if (fromArgs.length > 0) {
+    return fromArgs;
+  }
+  const fromPrompt = parseCoordinatePair(prompt);
+  if (fromPrompt.length > 0) {
+    return fromPrompt;
+  }
+  return parseCoordinatePair(defaultLocation);
+}
+
+function resolveLuckinLocation(request: LuckinOrderActionArgs, prompt: string): string {
+  return resolveLuckinLocationForTest(textOf(request.location), prompt, localProviderConfig.amapDefaultLocation);
+}
+
+function luckinShopSelectActions(shops: LuckinShopRecord[], location: string, prompt: string): A2uiAction[] {
+  const actions: A2uiAction[] = [];
+  const count = shops.length > 5 ? 5 : shops.length;
+  for (let index = 0; index < count; index++) {
+    const shop = shops[index];
+    const shopArgs: LuckinOrderActionArgs = {
+      deptId: textOf(shop.deptId),
+      deptName: luckinShopName(shop),
+      address: luckinShopAddress(shop),
+      distance: kmNumberDistanceText(firstText([shop.distanceDesc, shop.distance])),
+      location: luckinShopLocation(shop, location),
+      status: luckinShopStatus(shop)
+    };
+    actions.push({
+      id: 'luckin.order.preview',
+      label: '选择：' + luckinShopName(shop),
+      prompt: prompt,
+      variant: 'secondary',
+      kind: 'prompt',
+      args: shopArgs
+    });
+  }
+  return actions;
+}
+
+function luckinSelectedShop(shops: LuckinShopRecord[], deptId: string): LuckinShopRecord | null {
+  for (let index = 0; index < shops.length; index++) {
+    if (textOf(shops[index].deptId) === deptId) {
+      return shops[index];
+    }
+  }
+  return shops.length > 0 ? shops[0] : null;
+}
+
+function luckinFirstShop(payload: Object): LuckinShopRecord | null {
+  const data = mcpPayloadData(payload as LuckinPayload);
+  const shops = luckinShopsFromData(data as LuckinShopRecord[] | LuckinShopContainer | undefined);
+  return shops.length > 0 ? shops[0] : null;
+}
+
+function luckinOrderProduct(item: LuckinProductRecord, quantity: number): LuckinOrderProductArgs {
+  return {
+    productId: Number(textOf(item.productId)),
+    skuCode: luckinProductSku(item),
+    amount: quantity
+  };
+}
+
+function luckinGenericResultA2ui(surfaceId: string, toolId: string, title: string, summary: string, rows: A2uiLabelValueData[], rawPreview: string, actions: A2uiAction[]): string {
+  const results: A2uiGenericToolResultData[] = [{
+    sourceTag: '瑞幸',
+    toolName: toolId,
+    title: title,
+    status: 'success',
+    summary: summary,
+    rows: rows,
+    rawPreview: rawPreview
+  }];
+  const components: A2uiComponent[] = [
+    {
+      id: 'root',
+      component: 'SurfaceRoot',
+      child: 'results',
+      title: title,
+      status: 'ready'
+    },
+    {
+      id: 'results',
+      component: 'GenericToolResults',
+      title: title,
+      body: '以下展示瑞幸 MCP 的真实返回字段。',
+      status: 'ready',
+      dataPath: '/genericToolResults',
+      actions: actions
+    }
+  ];
+  const summaryData: A2uiSummaryData = {
+    text: summary,
+    toolName: toolId,
+    dataLabel: 'genericToolResults',
+    count: 1
+  };
+  const envelopes: A2uiEnvelope[] = [
+    {
+      createSurface: {
+        surfaceId: surfaceId,
+        root: 'root',
+        title: title,
+        intent: 'luckin',
+        status: 'ready',
+        sendDataModel: true
+      }
+    },
+    {
+      updateComponents: {
+        surfaceId: surfaceId,
+        components: components
+      }
+    },
+    {
+      updateDataModel: {
+        surfaceId: surfaceId,
+        path: '/genericToolResults',
+        value: results
+      }
+    },
+    {
+      updateDataModel: {
+        surfaceId: surfaceId,
+        path: '/summary',
+        value: summaryData
+      }
+    }
+  ];
+  return a2uiJsonl(envelopes);
+}
+
+function luckinErrorA2ui(surfaceId: string, toolId: string, title: string, message: string): string {
+  return luckinGenericResultA2ui(surfaceId, toolId, title, message, [{ label: '错误', value: message }], '', []);
+}
+
+async function callLocalLuckinPreview(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  if (token.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '瑞幸点单需要登录', '未配置 LUCKIN_MCP_TOKEN。请在瑞幸 AI 开放平台登录复制 Token 后同步到 HAP rawfile。');
+  }
+  const location = resolveLuckinLocation(request, prompt);
+  if (location.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '瑞幸点单缺少位置', '瑞幸下单需要当前经纬度。请允许定位权限后重试。');
+  }
+  const shopArgs: LuckinShopListArgs = {
+    deptName: '',
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location))
+  };
+  const shopPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryShopList', shopArgs);
+  const shops = luckinShopsFromData(mcpPayloadData(shopPayload as LuckinPayload) as LuckinShopRecord[] | LuckinShopContainer | undefined);
+  if (shops.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单门店', '瑞幸 MCP 没有返回可用门店。请换一个地点或门店名称。');
+  }
+  if (textOf(request.deptId).length === 0) {
+    const shopRows: A2uiLabelValueData[] = [];
+    const previewCount = shops.length > 5 ? 5 : shops.length;
+    for (let index = 0; index < previewCount; index++) {
+      const candidate = shops[index];
+      shopRows.push({
+        label: luckinShopName(candidate),
+        value: luckinShopAddress(candidate)
+      });
+    }
+    return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '选择瑞幸门店', '请选择要在哪家门店自取，选定后会继续查询商品并核价。', shopRows, '', luckinShopSelectActions(shops, location, prompt));
+  }
+  const shop = luckinSelectedShop(shops, textOf(request.deptId));
+  if (shop === null || textOf(shop.deptId).length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单门店', '瑞幸 MCP 没有返回可用门店。请换一个地点或门店名称。');
+  }
+  const quantity = luckinQuantityFromPrompt(prompt);
+  const groupName = textOf(request.attrGroup);
+  const choiceName = textOf(request.attrChoice);
+  const isOptionSwitch = groupName.length > 0 && choiceName.length > 0 && textOf(request.productId).length > 0;
+  let product: LuckinProductRecord;
+  if (isOptionSwitch) {
+    const switchedProduct = await luckinLoadProductForOptionSwitch(shop, request, prompt, token);
+    if (switchedProduct === null) {
+      return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '规格切换失败', '暂时无法切换「' + groupName + '」到「' + choiceName + '」。请稍后重试。');
+    }
+    product = switchedProduct;
+  } else {
+    const keyword = luckinProductSearchQuery(prompt, request);
+    const productSearchArgs: LuckinProductSearchArgs = {
+      deptId: Number(textOf(shop.deptId)),
+      query: keyword
+    };
+    const productPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'searchProductForMcp', productSearchArgs);
+    const products = luckinProductsFromPayload(productPayload);
+    if (products.length === 0 || textOf(products[0].productId).length === 0 || luckinProductSku(products[0]).length === 0) {
+      return luckinErrorA2ui(surfaceId, 'luckin.order.preview', '没有找到可下单商品', '瑞幸 MCP 没有返回可创建订单的商品或 skuCode。关键词：' + keyword);
+    }
+    const searchProduct = products[0];
+    product = await luckinLoadProductForPreview(shop, searchProduct, token);
+  }
+  const previewArgs: LuckinOrderRequestArgs = {
+    deptId: Number(textOf(shop.deptId)),
+    productList: [luckinOrderProduct(product, quantity)],
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location)),
+    remark: luckinRemarkFromPrompt(prompt)
+  };
+  const previewPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'previewOrder', previewArgs);
+  const preview = luckinOrderRecordFromPayload(previewPayload);
+  const productPictureUrl = isOptionSwitch ?
+    luckinPinnedProductPicture(request, product) :
+    luckinProductPictureUrl(product);
+  const createArgs: LuckinOrderActionArgs = {
+    deptId: textOf(shop.deptId),
+    deptName: luckinShopName(shop),
+    address: luckinShopAddress(shop),
+    distance: kmNumberDistanceText(firstText([shop.distanceDesc, shop.distance])),
+    location: location,
+    productId: textOf(product.productId),
+    productName: luckinProductName(product),
+    skuCode: luckinProductSku(product),
+    pictureUrl: productPictureUrl,
+    previewPrompt: luckinPreviewPromptFromProduct(prompt, product, quantity),
+    quantity: quantity,
+    price: firstText([preview.discountPrice, product.discountPrice, product.price, product.initPrice]),
+    couponCodeList: preview.couponCodeList === undefined ? [] : preview.couponCodeList,
+    remark: previewArgs.remark,
+    attrSelections: luckinAttrSelectionsMapFromProduct(product)
+  };
+  const rows: A2uiLabelValueData[] = [
+    { label: '门店', value: luckinShopName(shop) },
+    { label: '地址', value: luckinShopAddress(shop) },
+    { label: '商品', value: luckinProductName(product) + ' x' + quantity.toString() },
+    { label: 'SKU', value: luckinProductSku(product) },
+    { label: '商品图', value: productPictureUrl }
+  ];
+  luckinAttrOptionRows(product).forEach((row: A2uiLabelValueData) => {
+    rows.push(row);
+  });
+  rows.push({ label: '原价', value: luckinMoney(preview.totalInitialPrice) });
+  rows.push({ label: '优惠', value: luckinMoney(preview.privilegeMoney) });
+  rows.push({ label: '应付', value: luckinMoney(firstText([preview.discountPrice, createArgs.price])) });
+  rows.push({ label: '备注', value: textOf(createArgs.remark) });
+  const action: A2uiAction = {
+    id: 'luckin.order.create',
+    label: '确认下单',
+    prompt: '确认创建瑞幸订单',
+    variant: 'primary',
+    kind: 'prompt',
+    args: createArgs as Object
+  };
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.preview', '确认瑞幸订单', '请确认后再创建真实瑞幸订单。', rows, JSON.stringify(previewPayload).substring(0, 1200), [action]);
+}
+
+function luckinPaymentContextArgs(request: LuckinOrderActionArgs, orderId: string, payOrderUrl: string, payOrderQrCodeUrl: string): LuckinOrderActionArgs {
+  return {
+    deptId: request.deptId,
+    deptName: request.deptName,
+    address: request.address,
+    distance: request.distance,
+    location: request.location,
+    productId: request.productId,
+    productName: request.productName,
+    skuCode: request.skuCode,
+    pictureUrl: request.pictureUrl,
+    previewPrompt: request.previewPrompt,
+    attrSelections: request.attrSelections,
+    quantity: request.quantity,
+    price: request.price,
+    couponCodeList: request.couponCodeList,
+    remark: request.remark,
+    orderId: orderId,
+    payOrderUrl: payOrderUrl,
+    payOrderQrCodeUrl: payOrderQrCodeUrl
+  };
+}
+
+function luckinDemoAlipayAction(orderId: string): A2uiAction {
+  const args: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  return {
+    id: 'luckin.demo.alipay.open',
+    label: '支付宝支付（Demo）',
+    prompt: 'alipays://',
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+}
+
+function luckinDemoGooglePayAction(orderId: string): A2uiAction {
+  const args: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  return {
+    id: 'luckin.demo.googlepay.open',
+    label: 'Google Pay 转 5 美金（Demo）',
+    prompt: '用 Google Pay 给罗一格转 5 美金',
+    variant: 'secondary',
+    kind: 'client',
+    args: args
+  };
+}
+
+async function callLocalLuckinCreate(surfaceId: string, args: Object | null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  const location = resolveLuckinLocation(request, '');
+  if (token.length === 0 || textOf(request.deptId).length === 0 || textOf(request.productId).length === 0 || textOf(request.skuCode).length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.create', '瑞幸订单参数不足', '创建订单需要登录 Token、门店、商品和 skuCode。请先重新预览订单。');
+  }
+  const createArgs: LuckinOrderRequestArgs = {
+    deptId: Number(textOf(request.deptId)),
+    productList: [{
+      productId: Number(textOf(request.productId)),
+      skuCode: textOf(request.skuCode),
+      amount: Number(textOf(request.quantity).length > 0 ? textOf(request.quantity) : '1')
+    }],
+    longitude: Number(locationLongitude(location)),
+    latitude: Number(locationLatitude(location)),
+    remark: textOf(request.remark)
+  };
+  const coupons = request.couponCodeList === undefined ? [] : request.couponCodeList;
+  if (coupons.length > 0) {
+    createArgs.couponCodeList = coupons;
+  }
+  const createPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'createOrder', createArgs);
+  const createError = luckinPayloadErrorMessage(createPayload);
+  let created = luckinOrderRecordFromPayload(createPayload);
+  let orderId = firstText([created.orderIdStr, created.orderId, request.orderId]);
+  let payOrderUrl = textOf(created.payOrderUrl);
+  let payOrderQrCodeUrl = textOf(created.payOrderQrCodeUrl);
+  if (orderId.length === 0 && createError.length > 0) {
+    aiLogInfo('[AIPhone][LuckinOrderCreateDeferred] error=' + createError);
+  }
+  if (orderId.length > 0 && payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    try {
+      const detailArgs: LuckinOrderActionArgs = {
+        orderId: orderId
+      };
+      const detailPayload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs as Object);
+      const detail = luckinOrderRecordFromPayload(detailPayload);
+      orderId = firstText([detail.orderIdStr, detail.orderId, orderId]);
+      payOrderUrl = firstText([detail.payOrderUrl, payOrderUrl]);
+      payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, payOrderQrCodeUrl]);
+      created = {
+        discountPrice: firstText([detail.discountPrice, created.discountPrice]),
+        totalInitialPrice: firstText([detail.totalInitialPrice, created.totalInitialPrice]),
+        privilegeMoney: firstText([detail.privilegeMoney, created.privilegeMoney]),
+        orderIdStr: orderId,
+        payOrderUrl: payOrderUrl,
+        payOrderQrCodeUrl: payOrderQrCodeUrl
+      };
+      aiLogInfo('[AIPhone][LuckinOrderCreateDetailFallback] orderId=' + orderId +
+        ' payOrderUrlChars=' + payOrderUrl.length.toString() +
+        ' payOrderQrCodeUrlChars=' + payOrderQrCodeUrl.length.toString());
+    } catch (error) {
+      aiLogInfo('[AIPhone][LuckinOrderCreateDetailFallbackError] ' + textOf(error));
+    }
+  }
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: orderId },
+    { label: '门店', value: textOf(request.deptName) },
+    { label: '商品', value: textOf(request.productName) + ' x' + textOf(request.quantity) },
+    { label: '商品图', value: textOf(request.pictureUrl) },
+    { label: '原价', value: luckinMoney(firstText([created.totalInitialPrice])) },
+    { label: '优惠', value: luckinMoney(firstText([created.privilegeMoney])) },
+    { label: '应付', value: luckinMoney(firstText([created.discountPrice, request.price])) }
+  ];
+  luckinAttrOptionRowsFromSelections(luckinAttrSelectionsFromRequest(request)).forEach((row: A2uiLabelValueData) => {
+    rows.push(row);
+  });
+  if (payOrderUrl.length > 0) {
+    rows.push({ label: '支付链接', value: payOrderUrl });
+  }
+  if (payOrderQrCodeUrl.length > 0) {
+    rows.push({ label: '支付二维码', value: payOrderQrCodeUrl });
+  }
+  const paymentContextArgs = luckinPaymentContextArgs(request, orderId, payOrderUrl, payOrderQrCodeUrl);
+  const statusAction: A2uiAction = {
+    id: 'luckin.order.status',
+    label: '刷新订单状态',
+    prompt: '查询瑞幸订单状态',
+    variant: 'secondary',
+    kind: 'prompt',
+    args: paymentContextArgs as Object
+  };
+  const payAction: A2uiAction = {
+    id: 'luckin.pay.open',
+    label: payOrderUrl.length > 0 ? '打开微信支付' : '打开微信支付',
+    prompt: payOrderUrl.length > 0 ? payOrderUrl : payOrderQrCodeUrl,
+    variant: 'primary',
+    kind: 'client',
+    args: paymentContextArgs as Object
+  };
+  const createActions: A2uiAction[] = [payAction, luckinDemoAlipayAction(orderId), luckinDemoGooglePayAction(orderId), statusAction];
+  luckinPayDiagnosticsLog('LuckinOrderCreate', orderId, payOrderUrl, payOrderQrCodeUrl, createActions.length);
+  if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    aiLogInfo('[AIPhone][LuckinOrderCreateMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(createPayload) +
+      ' payloadPreview=' + JSON.stringify(createPayload).substring(0, 400));
+  }
+  const summary = createError.length > 0 ? createError : '';
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.create', '瑞幸订单已创建', summary, rows, JSON.stringify(createPayload).substring(0, 1200), createActions);
+}
+
+async function callLocalLuckinStatus(surfaceId: string, args: Object | null): Promise<string> {
+  const token = localProviderConfig.luckinMcpToken;
+  const request = luckinActionArgs(args);
+  const orderId = textOf(request.orderId);
+  if (token.length === 0 || orderId.length === 0) {
+    return luckinErrorA2ui(surfaceId, 'luckin.order.status', '无法查询瑞幸订单', token.length === 0 ? '未配置 LUCKIN_MCP_TOKEN。' : '缺少订单号。');
+  }
+  const detailArgs: LuckinOrderActionArgs = {
+    orderId: orderId
+  };
+  const payload = await callReadonlyBrandMcpTool('瑞幸', localProviderConfig.luckinMcpUrl, token, 'queryOrderDetailInfo', detailArgs);
+  const detail = luckinOrderRecordFromPayload(payload);
+  const rows: A2uiLabelValueData[] = [
+    { label: '订单号', value: firstText([detail.orderIdStr, detail.orderId, orderId]) },
+    { label: '订单状态', value: firstText([detail.orderStatusName, detail.orderStatus]) },
+    { label: '取餐时间', value: firstText([detail.takeMealTime, detail.aboutTime]) },
+    { label: '订单金额', value: luckinMoney(firstText([detail.discountPrice, detail.orderPayAmount])) },
+    { label: '支付链接', value: firstText([detail.payOrderUrl, request.payOrderUrl]) },
+    { label: '支付二维码', value: firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]) }
+  ];
+  const payOrderUrl = firstText([detail.payOrderUrl, request.payOrderUrl]);
+  const payOrderQrCodeUrl = firstText([detail.payOrderQrCodeUrl, request.payOrderQrCodeUrl]);
+  const statusArgs: LuckinOrderActionArgs = {
+    orderId: firstText([detail.orderIdStr, detail.orderId, orderId]),
+    payOrderUrl: payOrderUrl,
+    payOrderQrCodeUrl: payOrderQrCodeUrl
+  };
+  const statusAction: A2uiAction = {
+    id: 'luckin.order.status',
+    label: '刷新订单状态',
+    prompt: '查询瑞幸订单状态',
+    variant: 'secondary',
+    kind: 'prompt',
+    args: statusArgs
+  };
+  const payAction: A2uiAction = {
+    id: 'luckin.pay.open',
+    label: payOrderUrl.length > 0 ? '打开微信支付' : '打开支付二维码',
+    prompt: payOrderUrl.length > 0 ? payOrderUrl : payOrderQrCodeUrl,
+    variant: 'primary',
+    kind: 'client',
+    args: statusArgs
+  };
+  const resolvedOrderId = firstText([detail.orderIdStr, detail.orderId, orderId]);
+  const statusActions: A2uiAction[] = [];
+  if (payOrderUrl.length > 0 || payOrderQrCodeUrl.length > 0) {
+    statusActions.push(payAction);
+  } else if (resolvedOrderId.length > 0) {
+    statusActions.push({
+      id: 'luckin.pay.open',
+      label: '打开微信支付',
+      prompt: '',
+      variant: 'primary',
+      kind: 'client',
+      args: statusArgs
+    });
+  }
+  statusActions.push(luckinDemoAlipayAction(resolvedOrderId), luckinDemoGooglePayAction(resolvedOrderId), statusAction);
+  luckinPayDiagnosticsLog('LuckinOrderStatus', resolvedOrderId, payOrderUrl, payOrderQrCodeUrl, statusActions.length);
+  if (payOrderUrl.length === 0 && payOrderQrCodeUrl.length === 0) {
+    aiLogInfo('[AIPhone][LuckinOrderStatusMissingPay] mcpDataKeys=' + luckinMcpPayFieldKeys(payload));
+  }
+  return luckinGenericResultA2ui(surfaceId, 'luckin.order.status', '瑞幸订单状态', firstText([detail.orderStatusName, detail.orderStatus, '已返回订单状态']), rows, JSON.stringify(payload).substring(0, 1200), statusActions);
+}
+
+async function callLocalLuckinTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'luckin.order.create') {
+    return callLocalLuckinCreate(surfaceId, args);
+  }
+  if (toolId === 'luckin.order.status') {
+    return callLocalLuckinStatus(surfaceId, args);
+  }
+  return callLocalLuckinPreview(prompt, surfaceId, args);
 }
 
 function normalizeFoodName(value: string): string {
@@ -4361,7 +7875,50 @@ function foodSourceCount(item: A2uiFoodData): number {
   return foodTags(item, '').length;
 }
 
-function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData): number {
+export interface FoodPreferenceArgs {
+  brandPreference?: string;
+  brandStrict?: boolean;
+  sweetness?: string;
+}
+
+function foodPreferenceArgs(args: Object | null): FoodPreferenceArgs {
+  if (args === null) {
+    return {};
+  }
+  const raw = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const brand = textOf(raw.brandPreference).trim();
+  const brandStrict = textOf(raw.brandStrict).trim();
+  const sweetness = textOf(raw.sweetness).trim();
+  const preferences: FoodPreferenceArgs = {};
+  if (brand.length > 0) {
+    preferences.brandPreference = brand;
+  }
+  if (brandStrict === 'true') {
+    preferences.brandStrict = true;
+  }
+  if (sweetness.length > 0) {
+    preferences.sweetness = sweetness;
+  }
+  return preferences;
+}
+
+function foodMatchesBrand(item: A2uiFoodData, brand: string): boolean {
+  return brand.length > 0 && (item.name.indexOf(brand) >= 0 || foodHasSourceTag(item, brand));
+}
+
+function preferredFoodScore(item: A2uiFoodData, preferences: FoodPreferenceArgs): number {
+  const brand = preferences.brandPreference === undefined ? '' : preferences.brandPreference;
+  if (foodMatchesBrand(item, brand)) {
+    return -1000;
+  }
+  return 0;
+}
+
+function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData, preferences: FoodPreferenceArgs = {}): number {
+  const preferenceDiff = preferredFoodScore(left, preferences) - preferredFoodScore(right, preferences);
+  if (preferenceDiff !== 0) {
+    return preferenceDiff;
+  }
   const leftMerged = foodSourceCount(left) > 1 ? 0 : 1;
   const rightMerged = foodSourceCount(right) > 1 ? 0 : 1;
   if (leftMerged !== rightMerged) {
@@ -4374,9 +7931,12 @@ function compareVisibleFood(left: A2uiFoodData, right: A2uiFoodData): number {
   return left.name.localeCompare(right.name);
 }
 
-function selectVisibleFoodResults(foods: A2uiFoodData[]): A2uiFoodData[] {
-  const sorted = foods.slice();
-  sorted.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right));
+function selectVisibleFoodResults(foods: A2uiFoodData[], preferences: FoodPreferenceArgs = {}): A2uiFoodData[] {
+  const brand = preferences.brandPreference === undefined ? '' : preferences.brandPreference;
+  const strictFoods = preferences.brandStrict === true ? foods.filter((item: A2uiFoodData): boolean => foodMatchesBrand(item, brand)) : [];
+  const candidates = preferences.brandStrict === true ? strictFoods : foods;
+  const sorted = candidates.slice();
+  sorted.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right, preferences));
   const sourceOrder: string[] = [];
   for (let index = 0; index < sorted.length; index++) {
     addCoveredFoodSources(sourceOrder, sorted[index]);
@@ -4396,7 +7956,7 @@ function selectVisibleFoodResults(foods: A2uiFoodData[]): A2uiFoodData[] {
       selected.push(sorted[index]);
     }
   }
-  selected.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right));
+  selected.sort((left: A2uiFoodData, right: A2uiFoodData): number => compareVisibleFood(left, right, preferences));
   return selected;
 }
 
@@ -4409,7 +7969,7 @@ function findExistingFoodIndex(foods: A2uiFoodData[], item: A2uiFoodData): numbe
   return -1;
 }
 
-export function aggregateFoodProviderResults(results: FoodProviderResult[]): FoodAggregationResult {
+export function aggregateFoodProviderResults(results: FoodProviderResult[], preferences: FoodPreferenceArgs = {}): FoodAggregationResult {
   const foods: A2uiFoodData[] = [];
   const issues: FoodProviderResult[] = [];
   for (let resultIndex = 0; resultIndex < results.length; resultIndex++) {
@@ -4435,7 +7995,7 @@ export function aggregateFoodProviderResults(results: FoodProviderResult[]): Foo
     }
   }
   return {
-    foods: selectVisibleFoodResults(foods),
+    foods: selectVisibleFoodResults(foods, preferences),
     issues: issues
   };
 }
@@ -4483,7 +8043,7 @@ export function foodProviderProgressRows(providerNames: string[], completedResul
   return rows;
 }
 
-export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodProviderResult>[], initialResults: FoodProviderResult[], onPartial: (snapshot: FoodProviderPartialSnapshot) => void, partialDelayMs: number = 0): Promise<FoodProviderStreamResult> {
+export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodProviderResult>[], initialResults: FoodProviderResult[], onPartial: (snapshot: FoodProviderPartialSnapshot) => void, partialDelayMs: number = 0, preferences: FoodPreferenceArgs = {}): Promise<FoodProviderStreamResult> {
   const providerResults: FoodProviderResult[] = initialResults.slice();
   let completed = 0;
   const delayMs = partialDelayMs > 0 ? partialDelayMs : 0;
@@ -4499,7 +8059,7 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
         }
         providerResults.push(result);
         completed += 1;
-        const aggregated = aggregateFoodProviderResults(providerResults);
+        const aggregated = aggregateFoodProviderResults(providerResults, preferences);
         onPartial({
           provider: result.provider,
           completed: completed,
@@ -4515,7 +8075,7 @@ export async function streamFoodProviderResultsWithPartials(tasks: Promise<FoodP
   await Promise.all(wrappedTasks);
   await partialChain;
   return {
-    aggregation: aggregateFoodProviderResults(providerResults),
+    aggregation: aggregateFoodProviderResults(providerResults, preferences),
     results: providerResults
   };
 }
@@ -5071,8 +8631,9 @@ class LuckinMcpFoodProvider implements FoodProviderAdapter {
   }
 }
 
-async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null): Promise<string> {
+async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
   const key = localProviderConfig.amapKey;
+  const preferences = foodPreferenceArgs(args);
 
   const query = extractFoodQuery(prompt);
   const preflightResults: FoodProviderResult[] = [];
@@ -5151,9 +8712,11 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
         ' dataPaths=' + planned.updatedDataPaths.join(','));
       emitJsonl(planned.jsonl);
     }
-  }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0);
+  }, localToolDebugConfig.foodProviderDelayEnabled ? localToolDebugConfig.foodProviderDelayMs : 0, preferences);
   const aggregated = streamed.aggregation;
   const rows = foodProviderProgressRows(providerNames, streamed.results);
+  const preferenceNote = preferences.brandPreference !== undefined && preferences.brandPreference.length > 0 ?
+    (preferences.brandStrict === true ? '已按偏好只展示' : '已按偏好优先展示') + preferences.brandPreference + '相关真实结果。' : '';
   aiLogInfo('[AIPhone][LocalToolFoodAggregate] keyword=' + keyword +
     ' locationSource=' + locationSource +
     ' locationPresent=' + (location.length > 0 ? 'true' : 'false') +
@@ -5163,7 +8726,7 @@ async function callLocalFoodSearch(prompt: string, surfaceId: string, emitJsonl:
   const finalState = foodA2uiRenderState(
     surfaceId,
     '外卖聚合搜索',
-    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。',
+    '以下结果来自高德、腾讯地图、百度地图、Google Maps、美团联盟、淘宝闪购联盟，以及已配置的麦当劳/瑞幸官方 MCP；仅展示真实返回字段，不下单、不支付、不创建购物车。' + preferenceNote,
     aggregated.foods.length > 0 ?
       '已聚合 ' + aggregated.foods.length.toString() + ' 个可展示结果；' + rows.length.toString() + ' 个来源状态见下方。' :
       '所有来源都没有可展示外卖结果；下面只列出真实 provider 状态。',
@@ -5276,6 +8839,8 @@ interface DynamicPromptArgs {
 const dynamicToolRegistry: DynamicToolRegistry = new DynamicToolRegistry();
 const genericMcpClient: GenericMcpClient = new GenericMcpClient();
 const dynamicCredentialStore: AssetCredentialStore = new AssetCredentialStore();
+const socialHubClient: SocialHubClient = new SocialHubClient();
+const X_OAUTH_SETUP_URL: string = 'https://developer.x.com/en/portal/dashboard';
 
 let gmailMcpClient: GenericMcpClient = genericMcpClient;
 let gmailCredentialStore: CredentialStore = dynamicCredentialStore;
@@ -5843,9 +9408,14 @@ function dynamicDiscoveryMissingManifest(prompt: string): DynamicToolManifest {
   return manifest;
 }
 
-async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string): Promise<string> {
+async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   const discovery: DynamicToolDiscoveryResult | null = discoverDynamicToolForPrompt(prompt);
   if (discovery === null) {
+    const composioResult = await callComposioDynamic(prompt, args);
+    if (composioResult !== null) {
+      aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=dynamic.search source=composio status=' + composioResult.status);
+      return genericToolResultsA2ui(surfaceId, 'dynamic.search', [composioResult]);
+    }
     aiLogInfo('[AIPhone][DynamicToolDiscovery] query=' + prompt + ' selectedToolId=none source=modelscope-local-catalog');
     return connectCardA2ui(
       surfaceId,
@@ -5865,9 +9435,9 @@ async function buildDiscoveredDynamicToolJsonl(prompt: string, surfaceId: string
   return buildDynamicToolJsonlWithManifest(discovery.toolId, prompt, surfaceId, discovery.manifest);
 }
 
-async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string): Promise<string> {
+async function buildDynamicToolJsonl(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
   if (toolId === 'dynamic.search') {
-    return buildDiscoveredDynamicToolJsonl(prompt, surfaceId);
+    return buildDiscoveredDynamicToolJsonl(prompt, surfaceId, args);
   }
 
   const registration = dynamicToolRegistry.registrationForToolId(toolId);
@@ -5927,6 +9497,58 @@ export async function prepareGoogleOAuthAuthorizationUrl(setupUrl: string = GMAI
 
 export async function prepareGmailOAuthAuthorizationUrl(): Promise<string> {
   return prepareGoogleOAuthAuthorizationUrl(GMAIL_MCP_AUTH_SETUP_URL);
+}
+
+export function xOAuthConfigFromProvider(): XOAuthConfig {
+  return {
+    clientId: localProviderConfig.xOauthClientId,
+    redirectUri: localProviderConfig.xOauthRedirectUri.length > 0 ? localProviderConfig.xOauthRedirectUri : X_DEFAULT_REDIRECT_URI
+  };
+}
+
+export async function prepareXOAuthAuthorizationUrl(): Promise<string> {
+  const config = xOAuthConfigFromProvider();
+  if (config.clientId.length === 0 || config.redirectUri.length === 0) {
+    aiLogInfo('[AIPhone][XOAuthAuthorizeUrl] source=setup-docs clientConfigured=' +
+      (config.clientId.length > 0 ? 'true' : 'false') +
+      ' redirectConfigured=' + (config.redirectUri.length > 0 ? 'true' : 'false'));
+    return X_OAUTH_SETUP_URL;
+  }
+  const pending = createXOAuthPending();
+  await saveXOAuthPending(dynamicCredentialStore, pending);
+  aiLogInfo('[AIPhone][XOAuthPendingSaved] stateChars=' + pending.state.length.toString() +
+    ' verifierChars=' + pending.codeVerifier.length.toString() +
+    ' redirectChars=' + config.redirectUri.length.toString() +
+    ' clientChars=' + config.clientId.length.toString());
+  return buildXOAuthAuthorizationUrl(config, pending);
+}
+
+async function xAccessTokenForDm(): Promise<string> {
+  const token = await loadXOAuthTokenSet(dynamicCredentialStore);
+  if (token !== null) {
+    if (isXAccessTokenFresh(token)) {
+      return token.accessToken;
+    }
+    if (token.refreshToken.length > 0) {
+      const config = xOAuthConfigFromProvider();
+      if (config.clientId.length > 0) {
+        const refreshed = await refreshXOAuthAccessToken(config, token.refreshToken);
+        const saved = await saveXOAuthTokenSet(dynamicCredentialStore, refreshed);
+        return saved.accessToken;
+      }
+    }
+    return token.accessToken;
+  }
+  return dynamicCredentialStore.get(X_OAUTH_ACCESS_TOKEN_REF);
+}
+
+async function safeXAccessTokenForDm(): Promise<string> {
+  try {
+    return await xAccessTokenForDm();
+  } catch (error) {
+    aiLogError('[AIPhone][XOAuthAccessLoadFailed] ' + describeThrown(error));
+    return '';
+  }
 }
 
 async function gmailAccessTokenForMcp(): Promise<string> {
@@ -6095,6 +9717,24 @@ function fallbackMailSearchQuery(prompt: string): string {
   return last.length > 0 ? last : text;
 }
 
+function stripGenericMailQueryTerms(query: string): string {
+  const stops = [
+    '帮我', '请', '一下', '查看', '看看', '看', '搜索', '查询', '查找', '查',
+    'Gmail', '谷歌邮箱', '谷歌邮件', 'QQ邮箱', 'QQ 邮箱', 'QQ邮件', 'QQ 邮件',
+    '邮箱', '邮件', '收件箱', '里面', '里', '中', '关于', '有关', '相关',
+    '最新', '最近', '重要', '和我', '我的', '我', '的'
+  ];
+  let text = query.trim();
+  stops.forEach((stop: string) => {
+    text = text.split(stop).join(' ');
+  });
+  return text.split(/\s+/).filter((term: string) => {
+    const trimmed = term.trim();
+    const lower = trimmed.toLowerCase();
+    return trimmed.length > 0 && lower !== 'latest' && lower !== 'recent' && lower !== 'important';
+  }).join(' ').trim();
+}
+
 function defaultMailSearchWindow(query: string): string {
   const trimmed = query.trim();
   if (trimmed.length === 0 || hasMailTimeOperator(trimmed)) {
@@ -6103,16 +9743,23 @@ function defaultMailSearchWindow(query: string): string {
   return 'newer_than:30d ' + trimmed;
 }
 
+function isGmailSearchSummaryRow(row: DynamicGenericToolResult): boolean {
+  return row.title.trim() === 'Gmail 搜索条件' ||
+    (row.toolName === 'users.threads.list' && row.rawPreview.indexOf(' returned=') >= 0);
+}
+
 export function mailSearchArgs(prompt: string, args: Object | null): MailSearchArgs {
   const record = mailArgs(args);
-  const providers = stringListArg(record.providers);
+  const providers: string[] = [];
+  stringListArg(record.providers).forEach((provider: string) => providers.push(provider.toLowerCase()));
+  const hasExplicitQuery = record.query !== undefined;
   const explicitQuery = textOf(record.query).trim();
-  const query = explicitQuery.length > 0 ? explicitQuery : fallbackMailSearchQuery(prompt);
+  const query = stripGenericMailQueryTerms(hasExplicitQuery ? explicitQuery : fallbackMailSearchQuery(prompt));
   const normalizedQuery = defaultMailSearchWindow(query);
   return {
-    query: normalizedQuery.length > 0 ? normalizedQuery : defaultMailSearchWindow(prompt.trim()),
+    query: normalizedQuery.length > 0 ? normalizedQuery : 'newer_than:30d',
     pageSize: typeof record.pageSize === 'number' && record.pageSize > 0 ? Math.min(record.pageSize, 10) : 10,
-    providers: providers.length > 0 ? providers : ['gmail', 'qq'],
+    providers: providers.length > 0 ? providers : ['gmail', 'qq', 'outlook'],
     intentSummary: textOf(record.intentSummary)
   };
 }
@@ -6124,12 +9771,121 @@ function mailDraftArgs(args: Object | null): MailDraftArgs {
     accountLabel: textOf(record.accountLabel),
     threadId: textOf(record.threadId),
     messageId: textOf(record.messageId),
+    internetMessageId: textOf(record.internetMessageId),
     to: stringListArg(record.to),
     subject: textOf(record.subject),
     body: textOf(record.body),
     replyMode: textOf(record.replyMode),
     contextSummary: textOf(record.contextSummary)
   };
+}
+
+interface GmailDraftComposioArgs {
+  to: string[];
+  recipientEmail: string;
+  subject: string;
+  body: string;
+  threadId: string;
+  replyMode: string;
+}
+
+interface GmailReplyComposioArgs {
+  recipientEmail: string;
+  body: string;
+  threadId: string;
+}
+
+function firstMailRecipient(value: string[]): string {
+  if (value.length === 0) {
+    return '';
+  }
+  const trimmed = value[0].trim();
+  const left = trimmed.lastIndexOf('<');
+  const right = trimmed.lastIndexOf('>');
+  return left >= 0 && right > left ? trimmed.substring(left + 1, right).trim() : trimmed;
+}
+
+function mailReplyOperationResult(
+  command: MailReplyCommand,
+  operation: string,
+  message: string
+): MailReplyOperationResult {
+  const result: MailReplyOperationResult = {
+    requestKey: command.requestKey,
+    operation: operation,
+    provider: command.provider,
+    status: 'success',
+    message: message
+  };
+  return result;
+}
+
+export async function saveConfiguredMailDraft(command: MailReplyCommand): Promise<MailReplyOperationResult> {
+  if (command.body.trim().length === 0 || command.to.length === 0) {
+    throw new Error('Mail draft requires a recipient and body.');
+  }
+  const provider = command.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    const result = await new QqMailImapClient(qqMailConfig()).createDraft(command);
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'draft', '已保存到 QQ 邮箱草稿箱。');
+  }
+  if (provider === 'gmail') {
+    const args: GmailDraftComposioArgs = {
+      to: command.to,
+      recipientEmail: firstMailRecipient(command.to),
+      subject: command.subject,
+      body: command.body,
+      threadId: command.threadId,
+      replyMode: command.replyMode
+    };
+    const results = await configuredGmailResults(
+      'gmail.draft.create',
+      '保存 Gmail 回复草稿',
+      args as Object
+    );
+    const result = results[0];
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'draft', '已保存到 Gmail 草稿箱。');
+  }
+  throw new Error('Mail draft provider is not supported: ' + provider);
+}
+
+export async function sendConfiguredMailReply(command: MailReplyCommand): Promise<MailReplyOperationResult> {
+  if (command.body.trim().length === 0 || command.to.length === 0) {
+    throw new Error('Mail reply requires a recipient and body.');
+  }
+  const provider = command.provider.trim().toLowerCase();
+  if (provider === 'qq') {
+    const result = await new QqMailImapClient(qqMailConfig()).sendReply(command);
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'send', 'QQ 邮箱回复已发送。');
+  }
+  if (provider === 'gmail') {
+    const args: GmailReplyComposioArgs = {
+      recipientEmail: firstMailRecipient(command.to),
+      body: command.body,
+      threadId: command.threadId
+    };
+    const result = await composioFixedAppResult(
+      'gmail.reply.send',
+      'Gmail',
+      '回复 Gmail 线程',
+      '邮件回复',
+      args as Object
+    );
+    if (result.status !== 'success') {
+      throw new Error(result.summary);
+    }
+    return mailReplyOperationResult(command, 'send', 'Gmail 回复已发送。');
+  }
+  throw new Error('Mail reply provider is not supported: ' + provider);
 }
 
 function qqMailConfig(): QqMailConfig {
@@ -6142,22 +9898,249 @@ function qqMailConfig(): QqMailConfig {
   };
 }
 
+async function readConfiguredGmailDetail(args: MailDetailRequest): Promise<MailDetail> {
+  try {
+    const execution: ComposioRawExecution = await callComposioFixedRaw(
+      'Gmail read full thread ' + args.threadId,
+      'gmail.thread.read',
+      args as Object
+    );
+    aiLogInfo('[AIPhone][GmailDetailComposio] tool=' + execution.toolSlug +
+      ' responseChars=' + execution.observation.length.toString());
+    const payload = JSON.parse(execution.observation) as Object;
+    const payloadKeys = typeof payload === 'object' && !Array.isArray(payload) ?
+      Object.keys(payload).slice(0, 12).join(',') : '';
+    aiLogInfo('[AIPhone][GmailDetailComposioShape] topKeys=' + payloadKeys);
+    return gmailMailDetailFromPayload(payload, args);
+  } catch (composioError) {
+    const message = describeThrown(composioError);
+    aiLogError('[AIPhone][GmailDetailComposioFailed] ' + message.substring(0, 240));
+    const accessToken = await gmailAccessTokenForMcp();
+    if (accessToken.length === 0) {
+      throw new Error(message);
+    }
+    aiLogInfo('[AIPhone][GmailDetailLocalOAuthFallback] accessChars=' + accessToken.length.toString());
+    return readGmailMailDetail(accessToken, args);
+  }
+}
+
+export async function readConfiguredMailDetail(args: MailDetailRequest): Promise<MailDetail> {
+  const provider = args.provider.trim().toLowerCase();
+  aiLogInfo('[AIPhone][MailDetailReadStart] provider=' + provider +
+    ' requestKeyChars=' + args.requestKey.length.toString() +
+    ' threadIdChars=' + args.threadId.length.toString() +
+    ' messageIdChars=' + args.messageId.length.toString());
+  let detail: MailDetail;
+  if (provider === 'qq') {
+    detail = await new QqMailImapClient(qqMailConfig()).readDetail(args);
+  } else if (provider === 'gmail') {
+    detail = await readConfiguredGmailDetail(args);
+  } else {
+    throw new Error('Mail detail provider is not supported: ' + provider);
+  }
+  aiLogInfo('[AIPhone][MailDetailReadDone] provider=' + provider +
+    ' bodyChars=' + detail.bodyText.length.toString() +
+    ' to=' + detail.to.length.toString() +
+    ' cc=' + detail.cc.length.toString());
+  return detail;
+}
+
 function mailProviderError(provider: string, message: string): MailProviderStatus {
   return {
     provider: provider,
     status: 'error',
-    title: provider === 'qq' ? 'QQ 邮箱调用失败' : 'Gmail 调用失败',
+    title: provider === 'qq' ? 'QQ 邮箱调用失败' : (provider === 'outlook' ? 'Outlook 调用失败' : 'Gmail 调用失败'),
     message: message
   };
 }
 
-function mailProviderEmpty(provider: string, query: string): MailProviderStatus {
-  return {
-    provider: provider,
-    status: 'success',
-    title: provider === 'qq' ? 'QQ 邮箱已查询' : 'Gmail 已查询',
-    message: (provider === 'qq' ? 'QQ Mail' : 'Gmail') + ' returned no matching messages for query: ' + query
+function composioResultTitle(appName: string): string {
+  return 'Composio ' + appName + ' 结果';
+}
+
+function composioProviderPrompt(appName: string, query: string, kind: string): string {
+  return '帮我用 Composio ' + appName + ' 查 ' + query + kind;
+}
+
+async function composioAppResult(appName: string, query: string, kind: string): Promise<DynamicGenericToolResult> {
+  const prompt = composioProviderPrompt(appName, query, kind);
+  try {
+    const result = await callComposioDynamic(prompt, null);
+    if (result !== null) {
+      result.sourceTag = 'Composio ' + appName;
+      result.rows.push({ label: 'provider', value: appName });
+      return result;
+    }
+    return {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: 'Composio 没有处理该请求。',
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    };
+  } catch (error) {
+    return {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    };
+  }
+}
+
+function composioFixedRequestArgs(toolId: string, args: Object | null = null): Object {
+  const payload: ComposioFixedRequestPayload = {
+    fixedToolId: toolId
   };
+  if (args !== null) {
+    payload.fixedArgs = args;
+  }
+  return payload;
+}
+
+function composioPayloadRows(args: Object | null): A2uiLabelValueData[] {
+  if (args === null || Array.isArray(args) || typeof args !== 'object') {
+    return [];
+  }
+  const rows: A2uiLabelValueData[] = [];
+  const record = args as Record<string, Object | string | number | boolean | null | undefined>;
+  Object.keys(record).forEach((key: string) => {
+    const value = record[key];
+    const text = textOf(value).trim();
+    if (text.length > 0) {
+      rows.push({ label: key, value: text.substring(0, 360) });
+    }
+  });
+  return rows;
+}
+
+function composioFixedResult(toolId: string, appName: string, result: DynamicGenericToolResult, args: Object | null = null): DynamicGenericToolResult {
+  result.toolName = toolId;
+  result.sourceTag = 'Composio ' + appName;
+  if (result.rows.find((row: A2uiLabelValueData) => row.label === 'Tool ID') === undefined) {
+    result.rows.push({ label: 'Tool ID', value: toolId });
+  }
+  composioPayloadRows(args).forEach((row: A2uiLabelValueData) => {
+    if (result.rows.find((existing: A2uiLabelValueData) => existing.label === row.label) === undefined) {
+      result.rows.push(row);
+    }
+  });
+  return result;
+}
+
+async function composioFixedAppResult(
+  toolId: string,
+  appName: string,
+  query: string,
+  kind: string,
+  args: Object | null = null
+): Promise<DynamicGenericToolResult> {
+  const prompt = composioProviderPrompt(appName, query, kind);
+  try {
+    const result = await callComposioDynamic(prompt, composioFixedRequestArgs(toolId, args));
+    if (result !== null) {
+      result.rows.push({ label: 'provider', value: appName });
+      return composioFixedResult(toolId, appName, result, args);
+    }
+    return composioFixedResult(toolId, appName, {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: 'Composio 没有处理该请求。',
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    }, args);
+  } catch (error) {
+    return composioFixedResult(toolId, appName, {
+      sourceTag: 'Composio',
+      toolName: 'dynamic.search',
+      title: composioResultTitle(appName),
+      status: 'error',
+      summary: describeThrown(error),
+      rows: [{ label: '查询', value: query }],
+      rawPreview: prompt
+    }, args);
+  }
+}
+
+function firstUrlInText(value: string): string {
+  const parts = value.split('|').join(' ').split(' ');
+  for (let index = 0; index < parts.length; index++) {
+    let part = parts[index].trim();
+    while (part.length > 0) {
+      const last = part.charAt(part.length - 1);
+      if (last === ')' || last === ']' || last === ',' || last === ';' || last === '.') {
+        part = part.substring(0, part.length - 1);
+      } else {
+        break;
+      }
+    }
+    if (part.indexOf('https://') === 0 || part.indexOf('http://') === 0) {
+      return part;
+    }
+  }
+  return '';
+}
+
+function isComposioSystemLabel(label: string): boolean {
+  return label === '执行工具' || label === '查询' || label === '结果数量' || label === '结果摘要' ||
+    label === 'toolName' || label === 'source' || label === 'provider' || label === '阶段' || label === 'Tool ID';
+}
+
+function isSlackDirectMessageRow(row: A2uiLabelValueData): boolean {
+  const text = (row.label + ' ' + row.value).toLowerCase();
+  return text.indexOf('/archives/d') >= 0;
+}
+
+function socialConnectionStatus(status: string): string {
+  if (status === 'success') {
+    return 'connected';
+  }
+  if (status === 'needs_auth' || status === 'auth_required') {
+    return 'needs_auth';
+  }
+  return 'error';
+}
+
+function composioSocialFeedResult(platform: SocialHubPlatform, displayName: string, result: DynamicGenericToolResult): SocialHubFeedResult {
+  const connections: SocialHubConnectionData[] = [{
+    platform: platform,
+    status: socialConnectionStatus(result.status),
+    displayName: displayName,
+    accountId: '',
+    message: result.summary
+  } as SocialHubConnectionData];
+  const items: SocialHubItemData[] = [];
+  result.rows.forEach((row: A2uiLabelValueData, index: number) => {
+    if (isComposioSystemLabel(row.label) || row.value.trim().length === 0) {
+      return;
+    }
+    if (platform === 'slack' && !isSlackDirectMessageRow(row)) {
+      return;
+    }
+    items.push({
+      id: 'composio-' + platform + '-' + index.toString(),
+      platform: platform,
+      kind: 'message',
+      author: row.label,
+      handle: displayName,
+      text: row.value,
+      timestamp: '',
+      url: firstUrlInText(row.value),
+      mediaUrl: '',
+      channel: 'Composio',
+      channelId: '',
+      threadId: '',
+      unread: false
+    } as SocialHubItemData);
+  });
+  return { items: items, connections: connections };
 }
 
 function gmailResultsHaveError(results: DynamicGenericToolResult[]): boolean {
@@ -6171,8 +10154,176 @@ function gmailResultErrorSummary(results: DynamicGenericToolResult[]): string {
   return results[0].summary.length > 0 ? results[0].summary : results[0].title;
 }
 
+async function gmailOAuthFallbackResults(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DynamicGenericToolResult[]> {
+  const mcpToolName = gmailMcpToolNameForToolId(toolId);
+  if (mcpToolName.length === 0) {
+    return [];
+  }
+  try {
+    const accessToken = await gmailAccessTokenForMcp();
+    if (accessToken.length === 0) {
+      return [];
+    }
+    aiLogInfo('[AIPhone][GmailLocalOAuthFallback] toolId=' + toolId +
+      ' accessChars=' + accessToken.length.toString());
+    if (gmailMcpClient === genericMcpClient) {
+      return await callGmailApiTool(toolId, prompt, accessToken, args);
+    }
+    return [await gmailMcpClient.callTool(
+      gmailMcpRegistration(toolId, mcpToolName),
+      accessToken,
+      gmailMcpArgsForPrompt(toolId, prompt, args)
+    )];
+  } catch (error) {
+    aiLogError('[AIPhone][GmailLocalOAuthFallbackFailed] toolId=' + toolId +
+      ' reason=' + describeThrown(error).substring(0, 200));
+    return [];
+  }
+}
+
+async function configuredGmailResults(
+  toolId: string,
+  prompt: string,
+  args: Object | null
+): Promise<DynamicGenericToolResult[]> {
+  const composioResult = await composioFixedAppResult(
+    toolId,
+    'Gmail',
+    prompt,
+    toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply' ? '草稿' : '邮件',
+    args
+  );
+  if (composioResult.status === 'success') {
+    return [composioResult];
+  }
+  const fallbackResults = await gmailOAuthFallbackResults(toolId, prompt, args);
+  return fallbackResults.length > 0 ? fallbackResults : [composioResult];
+}
+
 function youtubeQueryFromArgs(prompt: string, args: Object | null): string {
   return mediaVideoQueryFromArgs(prompt, args);
+}
+
+function youtubeSearchOptionsFromArgs(args: Object | null): YouTubeSearchOptions {
+  if (args === null) {
+    return defaultYouTubeSearchOptions();
+  }
+  const record = args as Record<string, Object | string | number | boolean | null | undefined>;
+  const order = textOf(record.order).trim();
+  const rawMaxResults = record.maxResults;
+  return {
+    order: order.length > 0 ? order : 'relevance',
+    maxResults: typeof rawMaxResults === 'number' ? rawMaxResults : 10
+  };
+}
+
+interface SocialHubDraftRequestArgs {
+  itemId?: Object | string | number | boolean | null;
+  platform?: Object | string | number | boolean | null;
+  instruction?: Object | string | number | boolean | null;
+}
+
+function emptySocialHubDraftRequestArgs(): SocialHubDraftRequestArgs {
+  return {
+    itemId: '',
+    platform: '',
+    instruction: ''
+  };
+}
+
+function socialHubPlatformFromText(value: string): SocialHubPlatform {
+  const text = value.trim().toLowerCase();
+  if (text === 'x' || text === 'twitter') {
+    return 'x';
+  }
+  if (text === 'slack') {
+    return 'slack';
+  }
+  if (text === 'wecom' || text === 'wework' || text === '企业微信') {
+    return 'wecom';
+  }
+  if (text === 'discord' || text === 'linkedin' || text === 'whatsapp' || text === 'instagram') {
+    return text as SocialHubPlatform;
+  }
+  return 'unknown';
+}
+
+function isSocialHubToolId(toolId: string): boolean {
+  return toolId === 'social.feed.search' || toolId === 'social.reply.draft';
+}
+
+function socialHubProviderConfig(xUserAccessToken: string = ''): SocialHubProviderConfig {
+  return {
+    xBearerToken: localProviderConfig.xBearerToken,
+    xUsername: localProviderConfig.xUsername,
+    xUserAccessToken: xUserAccessToken,
+    slackUserToken: localProviderConfig.slackUserToken,
+    slackBotToken: localProviderConfig.slackBotToken
+  };
+}
+
+function shouldUseComposioSocialAggregate(prompt: string): boolean {
+  return prompt.trim().length > 0;
+}
+
+async function composioSocialAggregate(prompt: string): Promise<SocialHubFeedResult> {
+  const query = prompt.trim().length > 0 ? prompt.trim() : '最近消息';
+  const items: SocialHubItemData[] = [];
+  const connections: SocialHubConnectionData[] = [];
+  const results: SocialHubFeedResult[] = await Promise.all([
+    composioAppResult('Twitter', query, '最近 30 天私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('x', 'X', result)),
+    composioAppResult('Slack', query, '最近 30 天 DM 私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('slack', 'Slack', result)),
+    composioAppResult('Discord', query, '的消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('discord', 'Discord', result)),
+    composioAppResult('LinkedIn', query, '私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('linkedin', 'LinkedIn', result)),
+    composioAppResult('WhatsApp', query, '的消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('whatsapp', 'WhatsApp', result)),
+    composioAppResult('Instagram', query, '私信消息').then((result: DynamicGenericToolResult) =>
+      composioSocialFeedResult('instagram', 'Instagram', result))
+  ]);
+  results.forEach((result: SocialHubFeedResult) => {
+    result.items.forEach((item: SocialHubItemData) => items.push(item));
+    result.connections.forEach((connection: SocialHubConnectionData) => connections.push(connection));
+  });
+  return { items: items, connections: connections };
+}
+
+export async function sendLocalSocialHubReply(item: SocialHubItemData, text: string): Promise<SocialHubDraftData> {
+  return socialHubClient.sendReply(item, text, localProviderConfig.toolGatewayApiKey, socialHubProviderConfig());
+}
+
+async function callLocalSocialHubTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'social.reply.draft') {
+    const request: SocialHubDraftRequestArgs = args === null ? emptySocialHubDraftRequestArgs() : args as SocialHubDraftRequestArgs;
+    const itemId = textOf(request.itemId).trim();
+    const instruction = textOf(request.instruction).trim();
+    const draft = await socialHubClient.draft(
+      itemId.length > 0 ? itemId : prompt,
+      socialHubPlatformFromText(textOf(request.platform)),
+      instruction.length > 0 ? instruction : '生成一条简洁、可审核的回复草稿',
+      localProviderConfig.toolGatewayApiKey,
+      socialHubProviderConfig()
+    );
+    return socialHubDraftA2ui(surfaceId, draft);
+  }
+  if (toolId === 'social.feed.search' && shouldUseComposioSocialAggregate(prompt)) {
+    const result = await composioSocialAggregate(prompt);
+    return socialHubFeedA2ui(surfaceId, result.items, result.connections);
+  }
+  return socialHubFeedA2ui(surfaceId, [], []);
+}
+
+async function callLocalXTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'Twitter', prompt, '公开 posts', args)
+  ]);
 }
 
 async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -6180,21 +10331,12 @@ async function callLocalYouTubeTool(toolId: string, prompt: string, surfaceId: s
     return genericToolResultsA2ui(
       surfaceId,
       toolId,
-      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey)
+      await callYouTubeVideoSearch(youtubeQueryFromArgs(prompt, args), localProviderConfig.youtubeApiKey, youtubeSearchOptionsFromArgs(args))
     );
   }
-  return genericToolResultsA2ui(surfaceId, toolId, [{
-    sourceTag: 'YouTube Data API',
-    toolName: toolId,
-    title: 'YouTube OAuth 授权需要登录',
-    status: 'auth_required',
-    summary: '当前设备没有可用的 YouTube OAuth 授权；不会模拟播放列表或订阅内容。',
-    rows: [
-      { label: 'OAuth', value: 'Google YouTube scope required' },
-      { label: 'Client', value: localProviderConfig.googleOauthClientId.length > 0 ? 'configured' : 'missing GOOGLE_OAUTH_CLIENT_ID' }
-    ],
-    rawPreview: 'youtube oauth required'
-  }]);
+  return genericToolResultsA2ui(surfaceId, toolId, [
+    await composioFixedAppResult(toolId, 'YouTube', prompt, toolId === 'youtube.mine.subscriptions' ? '订阅' : '播放列表', args)
+  ]);
 }
 
 async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
@@ -6209,12 +10351,27 @@ async function callLocalMediaTool(toolId: string, prompt: string, surfaceId: str
       )
     );
   }
+  if (toolId === 'media.aggregate.search') {
+    return aggregateSearchA2ui(
+      surfaceId,
+      await callAggregateSearch(
+        prompt,
+        args,
+        localProviderConfig.youtubeApiKey,
+        socialHubClient,
+        socialHubProviderConfig(),
+        {
+          apiKey: localProviderConfig.zhihuApiKey
+        }
+      )
+    );
+  }
   return genericToolResultsA2ui(surfaceId, toolId, [{
     sourceTag: '媒体聚合',
     toolName: toolId,
     title: '未知媒体工具',
     status: 'error',
-    summary: '当前媒体聚合只支持 media.video.search。',
+    summary: '当前媒体聚合只支持 media.video.search 和 media.aggregate.search。',
     rows: [{ label: 'Tool ID', value: toolId }],
     rawPreview: 'unknown media tool'
   }]);
@@ -6227,48 +10384,14 @@ async function callLocalGmailTool(toolId: string, prompt: string, surfaceId: str
   if (toolId === 'gmail.open.web') {
     return gmailOpenWebA2ui(surfaceId, 'https://mail.google.com/mail/u/0/#inbox');
   }
-  const mcpToolName = gmailMcpToolNameForToolId(toolId);
-  if (mcpToolName.length === 0) {
-    return gmailAuthRequiredA2ui(surfaceId, toolId, '未知 Gmail 工具：' + toolId, GMAIL_MCP_AUTH_SETUP_URL);
-  }
-
-  let accessToken = '';
   try {
-    accessToken = await gmailAccessTokenForMcp();
-  } catch (error) {
-    return gmailUnavailableA2ui(surfaceId, toolId, prompt, describeThrown(error));
-  }
-  if (accessToken.length === 0) {
-    aiLogInfo('[AIPhone][GmailAccessMissing] toolId=' + toolId);
-    return gmailAuthRequiredA2ui(surfaceId, toolId, gmailAuthUnavailableMessage(toolId, prompt), await prepareGmailOAuthAuthorizationUrl());
-  }
-
-  try {
-    if (gmailMcpClient === genericMcpClient) {
-      aiLogInfo('[AIPhone][GmailApiRequest] toolId=' + toolId);
-      const apiResults = await callGmailApiTool(toolId, prompt, accessToken, args);
-      if (gmailResultsHaveError(apiResults)) {
-        aiLogInfo('[AIPhone][GmailApiErrorResult] toolId=' + toolId +
-          ' reason=' + gmailResultErrorSummary(apiResults).substring(0, 180));
-        if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-          return gmailDraftPreviewA2ui(surfaceId, apiResults[0]);
-        }
-        return gmailThreadResultsA2ui(surfaceId, toolId, apiResults);
-      }
-      if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-        return gmailDraftPreviewA2ui(surfaceId, apiResults[0]);
-      }
-      return gmailThreadResultsA2ui(surfaceId, toolId, apiResults);
-    }
-    aiLogInfo('[AIPhone][GmailMcpRequest] toolId=' + toolId +
-      ' mcpToolName=' + mcpToolName);
-    const result = await gmailMcpClient.callTool(gmailMcpRegistration(toolId, mcpToolName), accessToken, gmailMcpArgsForPrompt(toolId, prompt, args));
+    const results = await configuredGmailResults(toolId, prompt, args);
     if (toolId === 'gmail.draft.create' || toolId === 'gmail.draft.apply') {
-      return gmailDraftPreviewA2ui(surfaceId, result);
+      return gmailDraftPreviewA2ui(surfaceId, results[0]);
     }
-    return gmailThreadResultsA2ui(surfaceId, toolId, [result]);
+    return gmailThreadResultsA2ui(surfaceId, toolId, results);
   } catch (error) {
-    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(mcpToolName, describeThrown(error))]);
+    return gmailThreadResultsA2ui(surfaceId, toolId, [gmailErrorResult(toolId, describeThrown(error))]);
   }
 }
 
@@ -6277,49 +10400,19 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
     const parsed = mailSearchArgs(prompt, args);
     const threads: MailThreadResult[] = [];
     const statuses: MailProviderStatus[] = [];
+    const extras: DynamicGenericToolResult[] = [];
 
     if (parsed.providers.indexOf('gmail') >= 0) {
       try {
-        const accessToken = await gmailAccessTokenForMcp();
-        if (accessToken.length === 0) {
-          statuses.push(mailProviderError('gmail', gmailAuthUnavailableMessage('gmail.mail.search', prompt)));
-        } else {
-          const beforeCount = threads.length;
-          const beforeStatusCount = statuses.length;
-          const gmailRows = await callGmailApiTool('gmail.mail.search', prompt, accessToken, parsed as Object);
-          gmailRows.forEach((row: DynamicGenericToolResult) => {
-            if (row.status === 'success' && row.toolName === 'users.threads.get') {
-              const threadId = dynamicRowValue(row, 'Thread ID');
-              const labels = dynamicRowValue(row, 'Labels');
-              threads.push({
-                provider: 'gmail',
-                accountLabel: 'Gmail',
-                threadId: threadId,
-                messageId: threadId,
-                subject: row.title,
-                from: dynamicRowValue(row, 'From'),
-                to: [],
-                participants: [],
-                snippet: row.summary,
-                receivedAt: dynamicRowValue(row, 'Date'),
-                unread: labels.indexOf('UNREAD') >= 0,
-                important: labels.indexOf('IMPORTANT') >= 0,
-                sourceUrl: '',
-                rawProviderRef: threadId
-              });
-            } else if (row.title !== 'Gmail 搜索条件') {
-              statuses.push({
-                provider: 'gmail',
-                status: row.status,
-                title: row.title,
-                message: row.summary
-              });
-            }
-          });
-          if (threads.length === beforeCount && statuses.length === beforeStatusCount) {
-            statuses.push(mailProviderEmpty('gmail', parsed.query));
-          }
-        }
+        const gmailResults = await configuredGmailResults('gmail.mail.search', parsed.query, parsed as Object);
+        const gmailResult = gmailResults[0];
+        statuses.push({
+          provider: 'gmail',
+          status: gmailResult.status,
+          title: gmailResult.title,
+          message: gmailResult.summary
+        });
+        gmailResults.forEach((result: DynamicGenericToolResult) => extras.push(result));
       } catch (error) {
         statuses.push(mailProviderError('gmail', describeThrown(error)));
       }
@@ -6331,14 +10424,23 @@ async function callLocalMailTool(toolId: string, prompt: string, surfaceId: stri
         const qqRows = await qq.search(parsed);
         qqRows.forEach((row: MailThreadResult) => threads.push(row));
         if (qqRows.length === 0) {
-          statuses.push(mailProviderEmpty('qq', parsed.query));
+          statuses.push({
+            provider: 'qq',
+            status: 'success',
+            title: 'QQ Mail 没有找到匹配邮件',
+            message: 'QQ Mail 查询成功，但当前账号没有匹配邮件。'
+          });
         }
       } catch (error) {
         statuses.push(mailProviderError('qq', describeThrown(error)));
       }
     }
 
-    return mailResultsA2ui(surfaceId, toolId, threads, statuses);
+    if (parsed.providers.indexOf('outlook') >= 0) {
+      extras.push(await composioAppResult('Outlook', parsed.query, '的邮件'));
+    }
+
+    return mailResultsA2ui(surfaceId, toolId, threads, statuses, extras);
   }
 
   if (toolId === 'mail.draft.create') {
@@ -6421,17 +10523,381 @@ function calendarAuthUnavailableMessage(toolId: string, prompt: string): string 
   return 'Google Calendar OAuth 未授权：工具 ' + toolId + ' 已注册，但当前设备没有可用的 Calendar scope；请先授权 Calendar。AIPhone 不会模拟日程或 eventId。请求：' + prompt.substring(0, 160);
 }
 
-async function callLocalCalendarTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
-  let token = '';
+function calendarComposioArgs(toolId: string, prompt: string, args: Object | null): CalendarComposioArgs {
+  const source = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  const normalized = normalizedCalendarArgsForPrompt(toolId, prompt, source) as CalendarComposioArgs;
+  normalized.calendarId = textOf(normalized.calendarId).trim().length > 0 ? textOf(normalized.calendarId).trim() : 'primary';
+  normalized.confirmed = source.confirmed === true;
+  if (toolId === 'calendar.event.create' || toolId === 'calendar.event.update') {
+    normalized.start = calendarProviderDateTime(textOf(normalized.start));
+    normalized.end = calendarProviderDateTime(textOf(normalized.end));
+  }
+  if (toolId === 'calendar.event.delete') {
+    normalized.sendUpdates = 'none';
+  }
+  return normalized;
+}
+
+export function calendarDeleteConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = args === null ? JSON.parse('{}') as CalendarComposioArgs : args as CalendarComposioArgs;
+  return actionId === 'calendar.event.delete.confirm' && parsed.confirmed === true;
+}
+
+function calendarDeleteConfirmationResult(args: CalendarComposioArgs): DynamicGenericToolResult {
+  const eventId = textOf(args.eventId).trim();
+  if (eventId.length === 0) {
+    return {
+      sourceTag: 'Composio Google Calendar',
+      toolName: 'calendar.event.delete',
+      title: '需要日程 Event ID',
+      status: 'needs_input',
+      summary: '请先选择一条真实日程再删除。',
+      rows: [{ label: 'Missing', value: 'eventId' }],
+      rawPreview: 'missing=eventId'
+    };
+  }
+  const confirmArgs: CalendarDeleteConfirmArgs = {
+    eventId: eventId,
+    calendarId: textOf(args.calendarId).trim().length > 0 ? textOf(args.calendarId).trim() : 'primary',
+    title: textOf(args.title),
+    start: textOf(args.start),
+    end: textOf(args.end),
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '确认删除日程',
+    status: 'confirm_required',
+    summary: '删除后无法在本 App 内撤销，请确认。',
+    rows: [
+      { label: 'Event ID', value: eventId },
+      { label: 'Title', value: textOf(args.title) },
+      { label: 'Start', value: textOf(args.start) }
+    ],
+    rawPreview: 'confirm calendar delete eventId=' + eventId,
+    actions: [{
+      id: 'calendar.event.delete.confirm',
+      label: '确认删除',
+      prompt: '确认删除 Google Calendar 日程',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function calendarDeleteSelectorResult(): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio Google Calendar',
+    toolName: 'calendar.event.delete',
+    title: '请选择要删除的日程',
+    status: 'needs_input',
+    summary: '请说明日期和时间段，或先从日程列表中选择一条日程。',
+    rows: [],
+    rawPreview: 'missing structured calendar delete selector'
+  };
+}
+
+function hasCalendarLookupSelector(args: CalendarComposioArgs): boolean {
+  const start = Date.parse(textOf(args.timeMin));
+  const end = Date.parse(textOf(args.timeMax));
+  return !Number.isNaN(start) && !Number.isNaN(end) && end > start;
+}
+
+async function callLocalCalendarTool(
+  toolId: string,
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null = null
+): Promise<string> {
+  const normalized = calendarComposioArgs(toolId, prompt, args);
+  if (toolId === 'calendar.event.delete' && !calendarDeleteConfirmedForTest(actionId, normalized as Object)) {
+    if (textOf(normalized.eventId).trim().length === 0) {
+      if (!hasCalendarLookupSelector(normalized)) {
+        return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteSelectorResult()]);
+      }
+      try {
+        const lookup = await callComposioFixedRaw(
+          composioProviderPrompt('Google Calendar', prompt, '待删除日程'),
+          'calendar.events.search',
+          normalized as Object
+        );
+        const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+        if (generic.status === 'error') {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+            composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+          ]);
+        }
+        const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+        const target = calendarDeleteTargetFromResultsForTest(matches);
+        if (target === null) {
+          return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+        }
+        normalized.eventId = target.eventId;
+        normalized.title = target.title;
+        normalized.start = target.start;
+        normalized.end = target.end;
+      } catch (_error) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待删除日程', normalized as Object)
+        ]);
+      }
+    }
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarDeleteConfirmationResult(normalized)]);
+  }
+  if (toolId === 'calendar.event.update' && textOf(normalized.eventId).trim().length === 0 &&
+    hasCalendarLookupSelector(normalized)) {
+    try {
+      const lookup = await callComposioFixedRaw(
+        composioProviderPrompt('Google Calendar', prompt, '待修改日程'),
+        'calendar.events.search',
+        normalized as Object
+      );
+      const generic = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, prompt);
+      if (generic.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+          composioFixedResult('calendar.events.search', 'Google Calendar', generic, normalized as Object)
+        ]);
+      }
+      const matches = calendarResultsFromComposioObservation('calendar.events.search', lookup.observation, normalized);
+      const resolved = calendarUpdateArgsFromResultsForTest(normalized, matches);
+      if (resolved === null) {
+        return genericToolResultsA2ui(surfaceId, 'calendar.events.search', matches);
+      }
+      normalized.eventId = resolved.eventId;
+      normalized.title = resolved.title;
+    } catch (_error) {
+      return genericToolResultsA2ui(surfaceId, 'calendar.events.search', [
+        await composioFixedAppResult('calendar.events.search', 'Google Calendar', prompt, '待修改日程', normalized as Object)
+      ]);
+    }
+  }
+  const missing = calendarEventRequiredFields(toolId, normalized);
+  if (missing.length > 0) {
+    return genericToolResultsA2ui(surfaceId, toolId, [calendarMissingArgsResult(toolId, missing)]);
+  }
   try {
-    token = await googleAccessTokenForCalendar();
+    const execution = await callComposioFixedRaw(
+      composioProviderPrompt('Google Calendar', prompt, toolId === 'calendar.events.search' ? '日程' : '日程变更'),
+      toolId,
+      normalized as Object
+    );
+    const generic = composioDynamicResultFromObservation('execute', execution.observation, execution.toolSlug, prompt);
+    if (generic.status === 'error') {
+      return genericToolResultsA2ui(surfaceId, toolId, [composioFixedResult(toolId, 'Google Calendar', generic, normalized as Object)]);
+    }
+    return genericToolResultsA2ui(surfaceId, toolId,
+      calendarResultsFromComposioObservation(toolId, execution.observation, normalized));
   } catch (error) {
-    return calendarAuthRequiredA2ui(surfaceId, toolId, calendarAuthUnavailableMessage(toolId, prompt) + ' 错误：' + describeThrown(error), await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL));
+    return genericToolResultsA2ui(surfaceId, toolId, [
+      await composioFixedAppResult(toolId, 'Google Calendar', prompt,
+        toolId === 'calendar.events.search' ? '日程' : '日程变更', normalized as Object)
+    ]);
   }
-  if (token.length === 0) {
-    return calendarAuthRequiredA2ui(surfaceId, toolId, calendarAuthUnavailableMessage(toolId, prompt), await prepareGoogleOAuthAuthorizationUrl(GOOGLE_OAUTH_SETUP_URL));
+}
+
+function whatsAppArgs(args: Object | null): WhatsAppSendArgs {
+  return args === null ? JSON.parse('{}') as WhatsAppSendArgs : args as WhatsAppSendArgs;
+}
+
+function whatsAppRecipientDigits(value: string): string {
+  const input = value.trim();
+  if (input.length === 0 || input.charAt(0) !== '+') {
+    return '';
   }
-  return genericToolResultsA2ui(surfaceId, toolId, await callCalendarTool(toolId, prompt, token, args));
+  let digits = '';
+  for (let index = 1; index < input.length; index++) {
+    const char = input.charAt(index);
+    if (char >= '0' && char <= '9') {
+      digits += char;
+    } else if (char !== ' ' && char !== '-' && char !== '(' && char !== ')') {
+      return '';
+    }
+  }
+  return digits.length >= 8 && digits.length <= 15 ? digits : '';
+}
+
+export function whatsAppSendConfirmedForTest(actionId: string, args: Object | null): boolean {
+  const parsed = whatsAppArgs(args);
+  return actionId === 'whatsapp.message.send.confirm' && parsed.confirmed === true;
+}
+
+export function whatsAppProviderFailureSummaryForTest(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.indexOf('no active connection found') >= 0 || lower.indexOf('没有 active connected account') >= 0) {
+    return 'WhatsApp 授权刚完成，请返回 App 后重试一次。';
+  }
+  if ((lower.indexOf('code 100') >= 0 && lower.indexOf('error_subcode 33') >= 0) ||
+    lower.indexOf('object does not exist') >= 0 || lower.indexOf('unsupported get request') >= 0) {
+    return '当前 Business 账户的 WABA 配置无效或缺少管理权限，请重新授权。';
+  }
+  if (lower.indexOf('133010') >= 0 || lower.indexOf('account not registered') >= 0) {
+    return '当前 Business 发送号码尚未注册到 WhatsApp Cloud API，请先在 Meta 后台完成号码验证与 API 注册。';
+  }
+  if (lower.indexOf('not_verified') >= 0 || lower.indexOf('not verified') >= 0) {
+    return '当前 Business 发送号码尚未完成验证，请先在 Meta 后台完成验证。';
+  }
+  return 'WhatsApp Business 暂时无法发送，请刷新授权后重试。';
+}
+
+function whatsAppProviderFailureResult(raw: string): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: 'WhatsApp Business 发送失败',
+    status: 'error',
+    summary: whatsAppProviderFailureSummaryForTest(raw),
+    rows: [],
+    rawPreview: raw
+  };
+}
+
+function whatsAppInputResult(toNumber: string, text: string): DynamicGenericToolResult | null {
+  const missing: A2uiLabelValueData[] = [];
+  if (whatsAppRecipientDigits(toNumber).length === 0) {
+    missing.push({ label: 'Missing', value: 'toNumber (+country code)' });
+  }
+  if (text.trim().length === 0 || text.trim().length > 4096) {
+    missing.push({ label: 'Missing', value: 'text (1-4096 chars)' });
+  }
+  if (missing.length === 0) {
+    return null;
+  }
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要 WhatsApp Business 发送信息',
+    status: 'needs_input',
+    summary: '请提供带国家码的手机号和 1-4096 字符消息。',
+    rows: missing,
+    rawPreview: 'invalid whatsapp send input'
+  };
+}
+
+function whatsAppConfirmationResult(
+  toNumber: string,
+  text: string,
+  phoneNumberId: string,
+  wabaId: string,
+  previewUrl: boolean
+): DynamicGenericToolResult {
+  const confirmArgs: WhatsAppConfirmArgs = {
+    toNumber: toNumber,
+    text: text,
+    phoneNumberId: phoneNumberId,
+    wabaId: wabaId,
+    previewUrl: previewUrl,
+    confirmed: true
+  };
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '确认发送 WhatsApp 消息',
+    status: 'confirm_required',
+    summary: '将通过已授权的 WhatsApp Business 账号发送。',
+    rows: [
+      { label: '收件人', value: toNumber },
+      { label: '消息', value: text }
+    ],
+    rawPreview: 'confirm whatsapp send to=' + toNumber,
+    actions: [{
+      id: 'whatsapp.message.send.confirm',
+      label: '确认发送',
+      prompt: '确认通过 WhatsApp Business 发送消息',
+      variant: 'danger',
+      kind: 'prompt',
+      args: confirmArgs as Object
+    }]
+  };
+}
+
+function whatsAppPhoneSelectionResult(count: number): DynamicGenericToolResult {
+  return {
+    sourceTag: 'Composio WhatsApp Business',
+    toolName: 'whatsapp.message.send',
+    title: '需要选择 WhatsApp Business 发送号码',
+    status: 'needs_input',
+    summary: count === 0 ? '当前账号没有可用的 Business 发送号码。' : '当前账号有多个 Business 发送号码，请指定 phoneNumberId。',
+    rows: [{ label: 'Phone Number IDs', value: count.toString() }],
+    rawPreview: 'phoneNumberId count=' + count.toString()
+  };
+}
+
+async function callLocalWhatsAppTool(
+  prompt: string,
+  surfaceId: string,
+  actionId: string,
+  args: Object | null
+): Promise<string> {
+  const parsed = whatsAppArgs(args);
+  const toNumber = textOf(parsed.toNumber).trim();
+  const message = textOf(parsed.text).trim();
+  const inputError = whatsAppInputResult(toNumber, message);
+  if (inputError !== null) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [inputError]);
+  }
+  if (!whatsAppSendConfirmedForTest(actionId, args)) {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppConfirmationResult(
+        toNumber,
+        message,
+        textOf(parsed.phoneNumberId).trim(),
+        textOf(parsed.wabaId).trim(),
+        parsed.previewUrl === true
+      )
+    ]);
+  }
+  // A user may finish Composio authorization while this app process is still alive.
+  // Drop the stale Tool Router session before the confirmed send discovers its account.
+  refreshComposioConnections();
+  let phoneNumberId = textOf(parsed.phoneNumberId).trim();
+  if (phoneNumberId.length === 0) {
+    try {
+      const lookupArgs: WhatsAppPhoneNumbersArgs = {};
+      const wabaId = textOf(parsed.wabaId).trim();
+      if (wabaId.length > 0) {
+        lookupArgs.wabaId = wabaId;
+      }
+      const lookup = await callComposioFixedRaw(
+        'WhatsApp Business phone numbers',
+        'whatsapp.phone_numbers.list',
+        lookupArgs as Object
+      );
+      const lookupResult = composioDynamicResultFromObservation('execute', lookup.observation, lookup.toolSlug, 'WhatsApp Business phone numbers');
+      if (lookupResult.status === 'error') {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+          whatsAppProviderFailureResult(lookupResult.summary + ' ' + lookupResult.rawPreview)
+        ]);
+      }
+      const ids = composioPhoneNumberIdsFromObservation(lookup.observation);
+      if (ids.length !== 1) {
+        return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [whatsAppPhoneSelectionResult(ids.length)]);
+      }
+      phoneNumberId = ids[0];
+    } catch (error) {
+      return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+        whatsAppProviderFailureResult(describeThrown(error))
+      ]);
+    }
+  }
+  const providerArgs: WhatsAppProviderArgs = {
+    toNumber: whatsAppRecipientDigits(toNumber),
+    text: message,
+    phoneNumberId: phoneNumberId,
+    previewUrl: parsed.previewUrl === true
+  };
+  const result = await composioFixedAppResult('whatsapp.message.send', 'WhatsApp Business', prompt, '消息', providerArgs as Object);
+  if (result.status === 'success') {
+    result.title = 'WhatsApp Business 消息已发送';
+    result.summary = 'Provider 已确认发送成功。';
+  } else {
+    return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [
+      whatsAppProviderFailureResult(result.summary + ' ' + result.rawPreview)
+    ]);
+  }
+  return genericToolResultsA2ui(surfaceId, 'whatsapp.message.send', [result]);
 }
 
 function mapsArgs(args: Object | null): MapsToolArgs {
@@ -6459,6 +10925,9 @@ function mapsPlaceId(args: MapsToolArgs): string {
 }
 
 async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  if (toolId === 'maps.route.open') {
+    return genericToolResultsA2ui(surfaceId, toolId, [mapsRouteResult(args)]);
+  }
   const parsed = mapsArgs(args);
   if (toolId === 'maps.place.details') {
     return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceDetails(mapsPlaceId(parsed), localProviderConfig.googleMapsApiKey));
@@ -6467,9 +10936,856 @@ async function callLocalMapsTool(toolId: string, prompt: string, surfaceId: stri
   return genericToolResultsA2ui(surfaceId, toolId, await callMapsPlaceSearch(query.length > 0 ? query : prompt, localProviderConfig.googleMapsApiKey));
 }
 
-async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+function paymentArgs(args: Object | null): PaymentToolActionArgs {
+  if (args === null) {
+    return JSON.parse('{}') as PaymentToolActionArgs;
+  }
+  return args as PaymentToolActionArgs;
+}
+
+function paymentArgText(args: PaymentToolActionArgs, key: string): string {
+  const record = args as PaymentToolArgRecord;
+  return textOf(record[key]).trim();
+}
+
+function paymentProviderFromText(value: string): PaymentProvider {
+  const lower = value.trim().toLowerCase();
+  if (lower === 'paypal' || lower.indexOf('paypal') >= 0 || lower.indexOf('贝宝') >= 0) {
+    return 'paypal';
+  }
+  if (lower === 'stripe' || lower.indexOf('stripe') >= 0) {
+    return 'stripe';
+  }
+  return '';
+}
+
+function paymentCurrencyFromPrompt(source: string, fallback: string): string {
+  const lower = source.toLowerCase();
+  if (lower.indexOf('usd') >= 0 || source.indexOf('$') >= 0 || source.indexOf('美元') >= 0 || source.indexOf('美金') >= 0) {
+    return 'USD';
+  }
+  if (lower.indexOf('cny') >= 0 || lower.indexOf('rmb') >= 0 || source.indexOf('人民币') >= 0 || source.indexOf('元') >= 0) {
+    return 'CNY';
+  }
+  if (lower.indexOf('hkd') >= 0 || source.indexOf('港币') >= 0 || source.indexOf('港元') >= 0) {
+    return 'HKD';
+  }
+  if (lower.indexOf('jpy') >= 0 || source.indexOf('日元') >= 0) {
+    return 'JPY';
+  }
+  const cleaned = fallback.trim().toUpperCase();
+  return cleaned.length > 0 ? cleaned : 'USD';
+}
+
+function isAmountChar(char: string): boolean {
+  if (char === '.' || char === ',') {
+    return true;
+  }
+  const code = char.charCodeAt(0);
+  return code >= 48 && code <= 57;
+}
+
+function paymentAmountFromPrompt(source: string): string {
+  let started = false;
+  let amount = '';
+  for (let index = 0; index < source.length; index++) {
+    const char = source.charAt(index);
+    const code = char.charCodeAt(0);
+    if (!started) {
+      if (code >= 48 && code <= 57) {
+        started = true;
+        amount += char;
+      }
+      continue;
+    }
+    if (!isAmountChar(char)) {
+      break;
+    }
+    amount += char;
+  }
+  return amount;
+}
+
+function paymentAliasesForAccount(account: PaymentAccount): string[] {
+  const aliases: string[] = [account.id, account.displayName, account.email, account.paypalEmail, account.paypalMerchantId];
+  for (let index = 0; index < account.aliases.length; index++) {
+    aliases.push(account.aliases[index]);
+  }
+  return aliases;
+}
+
+function paymentRecipientFromPrompt(source: string, book: PaymentAccount[]): string {
+  const lower = source.toLowerCase();
+  const matches: PaymentAccount[] = [];
+  for (let accountIndex = 0; accountIndex < book.length; accountIndex++) {
+    const account = book[accountIndex];
+    if (!account.enabled) {
+      continue;
+    }
+    const aliases = paymentAliasesForAccount(account);
+    for (let aliasIndex = 0; aliasIndex < aliases.length; aliasIndex++) {
+      const alias = aliases[aliasIndex].trim();
+      if (alias.length < 2) {
+        continue;
+      }
+      if (lower.indexOf(alias.toLowerCase()) >= 0) {
+        matches.push(account);
+        break;
+      }
+    }
+  }
+  return matches.length === 1 ? matches[0].displayName : '';
+}
+
+function paymentAccountForId(id: string, book: PaymentAccount[]): PaymentAccount | null {
+  const normalized = id.trim().toLowerCase();
+  if (normalized.length === 0) {
+    return null;
+  }
+  for (let index = 0; index < book.length; index++) {
+    if (book[index].id.trim().toLowerCase() === normalized) {
+      return book[index];
+    }
+  }
+  return null;
+}
+
+function paymentProviderFromPrompt(source: string): PaymentProvider {
+  return paymentProviderFromText(source);
+}
+
+function paymentFundingSourceFromText(value: string): PaymentFundingSource {
+  const lower = value.trim().toLowerCase();
+  if (lower === 'google_pay' || lower.indexOf('google pay') >= 0 || lower.indexOf('googlepay') >= 0 ||
+    lower.indexOf('google wallet') >= 0 || value.indexOf('谷歌支付') >= 0) {
+    return 'google_pay';
+  }
+  return '';
+}
+
+function stringArray(value: string[] | undefined): string[] {
+  if (value === undefined || !Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const item = textOf(value[index]).trim();
+    if (item.length > 0) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+function normalizePaymentAccount(raw: PaymentAccountRaw): PaymentAccount | null {
+  const id = textOf(raw.id).trim();
+  const displayName = textOf(raw.displayName).trim();
+  const name = displayName.length > 0 ? displayName : id;
+  if (id.length === 0 || name.length === 0) {
+    return null;
+  }
+  const enabledText = textOf(raw.enabled).trim().toLowerCase();
+  return {
+    id: id,
+    displayName: name,
+    aliases: stringArray(raw.aliases),
+    email: textOf(raw.email).trim(),
+    paypalEmail: textOf(raw.paypalEmail).trim(),
+    paypalMerchantId: textOf(raw.paypalMerchantId).trim(),
+    stripeAccountId: textOf(raw.stripeAccountId).trim(),
+    stripePaymentLinkUrl: textOf(raw.stripePaymentLinkUrl).trim(),
+    enabled: enabledText.length === 0 || enabledText === 'true' || enabledText === '1'
+  };
+}
+
+function upsertPaymentAccount(accounts: PaymentAccount[], account: PaymentAccount): void {
+  for (let index = 0; index < accounts.length; index++) {
+    if (accounts[index].id === account.id) {
+      accounts[index] = account;
+      return;
+    }
+  }
+  accounts.push(account);
+}
+
+function paymentAccountBookFromConfig(): PaymentAccount[] {
+  const accounts = defaultPaymentAccountBook();
+  const customAccounts = paymentAccountsFromJson(localProviderConfig.paymentAccountBookJson);
+  for (let index = 0; index < customAccounts.length; index++) {
+    upsertPaymentAccount(accounts, customAccounts[index]);
+  }
+  return accounts;
+}
+
+function paymentAccountsFromJson(rawJson: string): PaymentAccount[] {
+  const accounts: PaymentAccount[] = [];
+  const raw = rawJson.trim();
+  if (raw.length === 0) {
+    return accounts;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Object;
+    if (!Array.isArray(parsed)) {
+      return accounts;
+    }
+    const customAccounts = parsed as PaymentAccountRaw[];
+    for (let index = 0; index < customAccounts.length; index++) {
+      const account = normalizePaymentAccount(customAccounts[index]);
+      if (account !== null) {
+        upsertPaymentAccount(accounts, account);
+      }
+    }
+  } catch (error) {
+    aiLogError('[AIPhone][PaymentConfig] accountBook parse failed: ' + describeThrown(error));
+  }
+  return accounts;
+}
+
+export function configureLocalPaymentAccountBookJson(rawJson: string): void {
+  const accounts = paymentAccountsFromJson(localProviderConfig.paymentAccountBookJson);
+  const savedAccounts = paymentAccountsFromJson(rawJson);
+  for (let index = 0; index < savedAccounts.length; index++) {
+    upsertPaymentAccount(accounts, savedAccounts[index]);
+  }
+  localProviderConfig.paymentAccountBookJson = JSON.stringify(accounts);
+}
+
+function paymentModeFromConfig(): PaymentMode {
+  return localProviderConfig.paymentMode.trim().toLowerCase() === 'live' ? 'live' : 'test';
+}
+
+function paymentAllowedStripeAccounts(): string[] {
+  const parts = localProviderConfig.paymentLiveAllowedStripeAccountIds.split(',');
+  const result: string[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const value = parts[index].trim();
+    if (value.length > 0) {
+      result.push(value);
+    }
+  }
+  return result;
+}
+
+function paymentLiveMaxAmountMinor(): number {
+  const value = Number(localProviderConfig.paymentLiveMaxAmountMinor.trim());
+  if (isNaN(value) || value <= 0) {
+    return 100;
+  }
+  return Math.floor(value);
+}
+
+function paymentPolicyFromConfig(): PaymentPolicy {
+  return {
+    mode: paymentModeFromConfig(),
+    defaultCurrency: localProviderConfig.paymentDefaultCurrency.trim().length > 0 ? localProviderConfig.paymentDefaultCurrency.trim().toUpperCase() : 'USD',
+    liveMaxAmountMinor: paymentLiveMaxAmountMinor(),
+    liveAllowedStripeAccountIds: paymentAllowedStripeAccounts()
+  };
+}
+
+function paymentDraftFromArgs(prompt: string, args: Object | null, book: PaymentAccount[]): PaymentRequestDraft {
+  const parsed = paymentArgs(args);
+  const originalQuery = paymentArgText(parsed, 'originalQuery');
+  const source = originalQuery.length > 0 ? originalQuery : prompt;
+  const account = paymentAccountForId(paymentArgText(parsed, 'accountId'), book);
+  let recipient = paymentArgText(parsed, 'recipient');
+  if (recipient.length === 0 && account !== null) {
+    recipient = account.displayName;
+  }
+  if (recipient.length === 0) {
+    recipient = paymentRecipientFromPrompt(source, book);
+  }
+  let amountText = paymentArgText(parsed, 'amountText');
+  if (amountText.length === 0) {
+    amountText = paymentAmountFromPrompt(source);
+  }
+  let currency = paymentArgText(parsed, 'currency').toUpperCase();
+  if (currency.length === 0) {
+    currency = paymentCurrencyFromPrompt(source, localProviderConfig.paymentDefaultCurrency);
+  }
+  let provider = paymentProviderFromText(paymentArgText(parsed, 'provider'));
+  if (provider.length === 0) {
+    provider = paymentProviderFromPrompt(source);
+  }
+  let fundingSource = paymentFundingSourceFromText(paymentArgText(parsed, 'fundingSource'));
+  if (fundingSource.length === 0) {
+    fundingSource = paymentFundingSourceFromText(source);
+  }
+  return {
+    recipient: recipient,
+    provider: provider,
+    fundingSource: fundingSource,
+    amountText: amountText,
+    currency: currency,
+    note: paymentArgText(parsed, 'note'),
+    phase: paymentArgText(parsed, 'phase')
+  };
+}
+
+function paymentAmountForProvider(result: PaymentValidationResult): string {
+  if (result.currency === 'JPY' || result.currency === 'KRW' || result.currency === 'VND') {
+    return result.amountMinor.toString();
+  }
+  const whole = Math.floor(result.amountMinor / 100);
+  const cents = result.amountMinor % 100;
+  return whole.toString() + '.' + (cents < 10 ? '0' : '') + cents.toString();
+}
+
+function paymentResultWithState(
+  result: PaymentValidationResult,
+  status: PaymentValidationStatus,
+  reason: string,
+  checkoutUrl: string,
+  providerSessionId: string
+): PaymentValidationResult {
+  return {
+    status: status,
+    targetType: result.targetType,
+    reason: reason,
+    recipient: result.recipient,
+    accountId: result.accountId,
+    displayName: result.displayName,
+    provider: result.provider,
+    fundingSource: result.fundingSource,
+    amountMinor: result.amountMinor,
+    amountText: result.amountText,
+    currency: result.currency,
+    note: result.note,
+    mode: result.mode,
+    paypalEmail: result.paypalEmail,
+    paypalMerchantId: result.paypalMerchantId,
+    stripeAccountId: result.stripeAccountId,
+    stripePaymentLinkUrl: result.stripePaymentLinkUrl,
+    checkoutUrl: checkoutUrl,
+    providerSessionId: providerSessionId,
+    paypalClientId: result.paypalClientId,
+    paypalEnvironment: result.paypalEnvironment
+  } as PaymentValidationResult;
+}
+
+export function paypalGooglePayNetworkHelpForTest(provider: string, fundingSource: string, reason: string): string {
+  if (provider !== 'paypal' || fundingSource !== 'google_pay') {
+    return reason;
+  }
+  if (!isTransientPayPalRequestErrorForTest(reason)) {
+    return reason;
+  }
+  return reason + ' 手机当前网络/VPN 无法连接 PayPal API。请先关闭 VPN 点“确认支付”创建 PayPal 订单；看到 Pay with G Pay 后，再打开 VPN 并点击 Google Pay。';
+}
+
+function paymentBlocked(result: PaymentValidationResult, reason: string): PaymentValidationResult {
+  return paymentResultWithState(result, 'blocked', paypalGooglePayNetworkHelpForTest(result.provider, result.fundingSource, reason), '', '');
+}
+
+function paymentCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
+  return paymentResultWithState(result, 'checkout', 'Provider checkout page is ready.', checkoutUrl, providerSessionId);
+}
+
+function paypalGooglePayCheckout(result: PaymentValidationResult, checkoutUrl: string, providerSessionId: string): PaymentValidationResult {
+  const checkout = paymentCheckout(result, checkoutUrl, providerSessionId);
+  if (result.fundingSource === 'google_pay') {
+    checkout.paypalClientId = localProviderConfig.paypalClientId;
+    checkout.paypalEnvironment = paypalEnvironmentFromConfig();
+  }
+  return checkout;
+}
+
+function isHttpSuccess(response: HttpTextResponse): boolean {
+  return response.code >= 200 && response.code < 300;
+}
+
+function providerFailure(provider: string, action: string, response: HttpTextResponse): string {
+  const snippet = response.text.length > 280 ? response.text.substring(0, 280) + '...' : response.text;
+  return provider + ' ' + action + ' failed with HTTP ' + response.code.toString() + ': ' + snippet;
+}
+
+function jsonStringField(rawJson: string, key: string): string {
+  try {
+    const parsed = JSON.parse(rawJson) as PaymentToolArgRecord;
+    return textOf(parsed[key]).trim();
+  } catch (_error) {
+    return '';
+  }
+}
+
+function paypalEnvironmentFromConfig(): PayPalEnvironment {
+  return localProviderConfig.paypalEnvironment === 'live' ? 'live' : 'sandbox';
+}
+
+function paypalGatewayBaseEndpoint(): string {
+  let endpoint = localProviderConfig.paypalCheckoutGatewayUrl.trim();
+  if (endpoint.length === 0) {
+    return '';
+  }
+  while (endpoint.endsWith('/')) {
+    endpoint = endpoint.substring(0, endpoint.length - 1);
+  }
+  if (endpoint.endsWith('/api/payment/paypal/checkout')) {
+    return endpoint.substring(0, endpoint.length - '/api/payment/paypal/checkout'.length);
+  }
+  if (endpoint.endsWith('/api/payment/paypal/capture')) {
+    return endpoint.substring(0, endpoint.length - '/api/payment/paypal/capture'.length);
+  }
+  return endpoint;
+}
+
+async function createPayPalGatewayCheckout(result: PaymentValidationResult, baseEndpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(baseEndpoint + '/api/payment/paypal/checkout', stripeGatewayHeaders(), JSON.stringify({
+    payeeEmail: result.paypalEmail,
+    payeeMerchantId: result.paypalMerchantId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    returnUrl: localProviderConfig.paypalReturnUrl,
+    cancelUrl: localProviderConfig.paypalCancelUrl,
+    note: result.note
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'PayPal checkout gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('PayPal checkout gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  const checkoutUrl = payload.checkoutUrl === undefined ? '' : payload.checkoutUrl.trim();
+  if (!checkoutUrl.startsWith('https://www.paypal.com/') && !checkoutUrl.startsWith('https://www.sandbox.paypal.com/')) {
+    return paymentBlocked(result, 'PayPal checkout gateway did not return an approval URL.');
+  }
+  const providerSessionId = payload.providerSessionId === undefined ? '' : payload.providerSessionId.trim();
+  return paypalGooglePayCheckout(result, checkoutUrl, providerSessionId);
+}
+
+async function capturePayPalGatewayPayment(result: PaymentValidationResult, orderId: string, baseEndpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(baseEndpoint + '/api/payment/paypal/capture', stripeGatewayHeaders(), JSON.stringify({
+    providerSessionId: orderId
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'PayPal capture gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('PayPal capture gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  return paymentResultWithState(result, 'completed', 'PayPal capture completed.', '', orderId);
+}
+
+async function createPayPalAccessToken(): Promise<PayPalAccessTokenResult> {
+  if (localProviderConfig.paypalClientId.length === 0 || localProviderConfig.paypalClientSecret.length === 0) {
+    return {
+      accessToken: '',
+      error: 'Missing PayPal credentials. Set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in the provider config.'
+    };
+  }
+  const environment = paypalEnvironmentFromConfig();
+  const tokenRequest = buildPayPalTokenRequest({
+    environment: environment,
+    clientId: localProviderConfig.paypalClientId,
+    clientSecret: localProviderConfig.paypalClientSecret
+  });
+  const tokenHeaders: HttpRequestHeaders = {
+    'Authorization': tokenRequest.headers.Authorization,
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Accept': tokenRequest.headers.Accept
+  };
+  let tokenResponse: HttpTextResponse;
+  try {
+    tokenResponse = await postPayPalTextWithRetry('token request', tokenRequest.url, tokenHeaders, tokenRequest.body);
+  } catch (error) {
+    return { accessToken: '', error: 'PayPal token request failed: ' + describeThrown(error) };
+  }
+  if (!isHttpSuccess(tokenResponse)) {
+    return { accessToken: '', error: providerFailure('PayPal', 'token request', tokenResponse) };
+  }
+  let tokenPayload: PayPalTokenResponsePayload;
+  try {
+    tokenPayload = JSON.parse(tokenResponse.text) as PayPalTokenResponsePayload;
+  } catch (_error) {
+    return { accessToken: '', error: 'PayPal token response was not valid JSON.' };
+  }
+  const accessToken = tokenPayload.access_token === undefined ? '' : tokenPayload.access_token.trim();
+  if (accessToken.length === 0) {
+    return { accessToken: '', error: 'PayPal token response did not include access_token.' };
+  }
+  return { accessToken: accessToken, error: '' };
+}
+
+async function createPayPalCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
+  const gatewayEndpoint = paypalGatewayBaseEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return createPayPalGatewayCheckout(result, gatewayEndpoint);
+  }
+  const token = await createPayPalAccessToken();
+  if (token.error.length > 0) {
+    return paymentBlocked(result, token.error);
+  }
+  const environment = paypalEnvironmentFromConfig();
+  const orderRequest = buildPayPalOrderRequest({
+    environment: environment,
+    accessToken: token.accessToken,
+    amountText: paymentAmountForProvider(result),
+    currency: result.currency,
+    payeeEmail: result.paypalEmail,
+    payeeMerchantId: result.paypalMerchantId,
+    returnUrl: localProviderConfig.paypalReturnUrl,
+    cancelUrl: localProviderConfig.paypalCancelUrl,
+    note: result.note
+  });
+  const orderHeaders: HttpRequestHeaders = {
+    'Authorization': orderRequest.headers.Authorization,
+    'Content-Type': 'application/json',
+    'Accept': orderRequest.headers.Accept
+  };
+  let orderResponse: HttpTextResponse;
+  try {
+    orderResponse = await postPayPalTextWithRetry('order create', orderRequest.url, orderHeaders, orderRequest.body);
+  } catch (error) {
+    return paymentBlocked(result, 'PayPal order create failed: ' + describeThrown(error));
+  }
+  if (!isHttpSuccess(orderResponse)) {
+    return paymentBlocked(result, providerFailure('PayPal', 'order create', orderResponse));
+  }
+  const approvalUrl = paypalApprovalUrlFromOrder(orderResponse.text);
+  if (approvalUrl.length === 0) {
+    return paymentBlocked(result, 'PayPal order response did not include an approve URL.');
+  }
+  return paypalGooglePayCheckout(result, approvalUrl, jsonStringField(orderResponse.text, 'id'));
+}
+
+async function capturePayPalPayment(result: PaymentValidationResult, orderId: string): Promise<PaymentValidationResult> {
+  const cleanedOrderId = orderId.trim();
+  if (cleanedOrderId.length === 0) {
+    return paymentBlocked(result, 'Missing PayPal order id for capture.');
+  }
+  const gatewayEndpoint = paypalGatewayBaseEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return capturePayPalGatewayPayment(result, cleanedOrderId, gatewayEndpoint);
+  }
+  const token = await createPayPalAccessToken();
+  if (token.error.length > 0) {
+    return paymentBlocked(result, token.error);
+  }
+  const captureRequest = buildPayPalCaptureRequest({
+    environment: paypalEnvironmentFromConfig(),
+    accessToken: token.accessToken,
+    orderId: cleanedOrderId
+  });
+  const captureHeaders: HttpRequestHeaders = {
+    'Authorization': captureRequest.headers.Authorization,
+    'Content-Type': 'application/json',
+    'Accept': captureRequest.headers.Accept
+  };
+  let captureResponse: HttpTextResponse;
+  try {
+    captureResponse = await postPayPalTextWithRetry('order capture', captureRequest.url, captureHeaders, captureRequest.body);
+  } catch (error) {
+    return paymentBlocked(result, 'PayPal order capture failed: ' + describeThrown(error));
+  }
+  if (!isHttpSuccess(captureResponse)) {
+    return paymentBlocked(result, providerFailure('PayPal', 'order capture', captureResponse));
+  }
+  return paymentResultWithState(result, 'completed', 'PayPal capture completed.', '', cleanedOrderId);
+}
+
+function stripeCheckoutGatewayEndpoint(): string {
+  let endpoint = localProviderConfig.stripeCheckoutGatewayUrl.trim();
+  if (endpoint.length === 0) {
+    return '';
+  }
+  while (endpoint.endsWith('/')) {
+    endpoint = endpoint.substring(0, endpoint.length - 1);
+  }
+  if (endpoint.endsWith('/api/payment/stripe/checkout')) {
+    return endpoint;
+  }
+  return endpoint + '/api/payment/stripe/checkout';
+}
+
+function stripeGatewayHeaders(): HttpRequestHeaders {
+  const headers: HttpRequestHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+  if (localProviderConfig.toolGatewayApiKey.length > 0) {
+    headers.Authorization = 'Bearer ' + localProviderConfig.toolGatewayApiKey;
+  }
+  return headers;
+}
+
+async function createStripeGatewayCheckout(result: PaymentValidationResult, endpoint: string): Promise<PaymentValidationResult> {
+  const response = await postJsonText(endpoint, stripeGatewayHeaders(), JSON.stringify({
+    connectedAccountId: result.stripeAccountId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    merchantName: result.displayName,
+    successUrl: localProviderConfig.stripeSuccessUrl,
+    cancelUrl: localProviderConfig.stripeCancelUrl,
+    idempotencyKey: paymentIdempotencyKey(result),
+    note: result.note,
+    fundingSource: result.fundingSource
+  }));
+  let payload: StripeCheckoutGatewayPayload;
+  try {
+    payload = JSON.parse(response.text) as StripeCheckoutGatewayPayload;
+  } catch (_error) {
+    return paymentBlocked(result, 'Stripe checkout gateway response was not valid JSON.');
+  }
+  if (!isHttpSuccess(response) || payload.ok !== true) {
+    return paymentBlocked(result, payload.error === undefined ? ('Stripe checkout gateway failed with HTTP ' + response.code.toString() + '.') : payload.error);
+  }
+  const checkoutUrl = payload.checkoutUrl === undefined ? '' : payload.checkoutUrl.trim();
+  if (!checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+    return paymentBlocked(result, 'Stripe checkout gateway did not return a hosted Checkout URL.');
+  }
+  const providerSessionId = payload.providerSessionId === undefined ? '' : payload.providerSessionId.trim();
+  return paymentCheckout(result, checkoutUrl, providerSessionId);
+}
+
+async function createStripeCheckout(result: PaymentValidationResult): Promise<PaymentValidationResult> {
+  if (result.targetType === 'stripe_payment_link') {
+    if (!isStripePaymentLinkUrl(result.stripePaymentLinkUrl)) {
+      return paymentBlocked(result, 'Stripe Payment Link URL is not valid.');
+    }
+    return paymentCheckout(result, result.stripePaymentLinkUrl, '');
+  }
+  const gatewayEndpoint = stripeCheckoutGatewayEndpoint();
+  if (gatewayEndpoint.length > 0) {
+    return createStripeGatewayCheckout(result, gatewayEndpoint);
+  }
+  if (localProviderConfig.stripeSecretKey.length === 0) {
+    return paymentBlocked(result, 'Missing Stripe secret key. Set STRIPE_SECRET_KEY in the provider config.');
+  }
+  const checkoutRequest = buildStripeCheckoutSessionRequest({
+    secretKey: localProviderConfig.stripeSecretKey,
+    connectedAccountId: result.stripeAccountId,
+    amountMinor: result.amountMinor,
+    currency: result.currency,
+    merchantName: result.displayName,
+    successUrl: localProviderConfig.stripeSuccessUrl,
+    cancelUrl: localProviderConfig.stripeCancelUrl,
+    idempotencyKey: paymentIdempotencyKey(result),
+    note: result.note,
+    fundingSource: result.fundingSource
+  });
+  const response = await postFormText(checkoutRequest.url, {
+    'Authorization': checkoutRequest.headers.Authorization,
+    'Content-Type': checkoutRequest.headers.ContentType,
+    'Idempotency-Key': checkoutRequest.headers.IdempotencyKey
+  }, checkoutRequest.body);
+  if (!isHttpSuccess(response)) {
+    return paymentBlocked(result, providerFailure('Stripe', 'Checkout Session create', response));
+  }
+  const checkoutUrl = stripeCheckoutUrlFromResponse(response.text);
+  if (checkoutUrl.length === 0) {
+    return paymentBlocked(result, 'Stripe Checkout Session response did not include a checkout URL.');
+  }
+  return paymentCheckout(result, checkoutUrl, jsonStringField(response.text, 'id'));
+}
+
+function stripeReceivingProfileRecordFromValue(value: Object | string | number | boolean | null | undefined): Record<string, Object | string | number | boolean | null | undefined> {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return JSON.parse('{}') as Record<string, Object | string | number | boolean | null | undefined>;
+  }
+  return value as Record<string, Object | string | number | boolean | null | undefined>;
+}
+
+function stripeReceivingStatusFromText(value: string, fallback: StripeReceivingAccountStatus): StripeReceivingAccountStatus {
+  if (value === 'not_created' || value === 'onboarding_required' || value === 'pending_review' ||
+    value === 'receivable' || value === 'blocked' || value === 'config_missing') {
+    return value;
+  }
+  return fallback;
+}
+
+function applyStripeReceivingProfileRecord(profile: StripeReceivingProfile, record: Record<string, Object | string | number | boolean | null | undefined>): void {
+  const agentId = textOf(record.agentId).trim();
+  const deviceId = textOf(record.deviceId).trim();
+  const displayName = textOf(record.displayName).trim();
+  const email = textOf(record.email).trim();
+  const country = textOf(record.country).trim().toUpperCase();
+  const businessType = textOf(record.businessType).trim();
+  const stripeAccountId = textOf(record.stripeAccountId).trim();
+  const status = textOf(record.status).trim();
+  profile.agentId = agentId.length > 0 ? agentId : profile.agentId;
+  profile.deviceId = deviceId.length > 0 ? deviceId : profile.deviceId;
+  profile.displayName = displayName.length > 0 ? displayName : profile.displayName;
+  profile.email = email.length > 0 ? email : profile.email;
+  profile.country = country.length > 0 ? country : profile.country;
+  profile.businessType = businessType.length > 0 ? businessType : profile.businessType;
+  profile.stripeAccountId = stripeAccountId.length > 0 ? stripeAccountId : profile.stripeAccountId;
+  profile.status = stripeReceivingStatusFromText(status, profile.status);
+}
+
+function stripeReceivingProfileFromConfig(args: Object | null): StripeReceivingProfile {
+  const profile = blankStripeReceivingProfile();
+  profile.agentId = 'agent_phone_owner';
+  profile.deviceId = 'phone_local_device';
+  profile.displayName = 'My Agent';
+  profile.country = 'US';
+  if (localProviderConfig.stripeReceivingAgentJson.length > 0) {
+    try {
+      applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(JSON.parse(localProviderConfig.stripeReceivingAgentJson) as Object));
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfile] ' + describeThrown(error));
+    }
+  }
+  if (args !== null) {
+    applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(args));
+  }
+  return profile;
+}
+
+function stripeReceivingProfileJson(profile: StripeReceivingProfile): string {
+  return JSON.stringify({
+    agentId: profile.agentId,
+    deviceId: profile.deviceId,
+    displayName: profile.displayName,
+    email: profile.email,
+    country: profile.country,
+    businessType: profile.businessType,
+    stripeAccountId: profile.stripeAccountId,
+    status: profile.status
+  });
+}
+
+export function configureLocalStripeReceivingAgentJson(rawJson: string): void {
+  const profile = stripeReceivingProfileFromConfig(null);
+  const raw = rawJson.trim();
+  if (raw.length > 0) {
+    try {
+      applyStripeReceivingProfileRecord(profile, stripeReceivingProfileRecordFromValue(JSON.parse(raw) as Object));
+    } catch (error) {
+      aiLogError('[AIPhone][StripeReceivingProfile] saved profile parse failed: ' + describeThrown(error));
+    }
+  }
+  localProviderConfig.stripeReceivingAgentJson = stripeReceivingProfileJson(profile);
+}
+
+function stripeReceivingCard(profile: StripeReceivingProfile, status: string, message: string, onboardingUrl: string = '', currentlyDue: string[] = []): StripeReceivingAccountCardData {
+  return {
+    status: status,
+    title: 'Stripe 收款账户',
+    message: message,
+    agentId: profile.agentId,
+    deviceId: profile.deviceId,
+    displayName: profile.displayName,
+    email: profile.email,
+    country: profile.country,
+    businessType: profile.businessType,
+    stripeAccountId: profile.stripeAccountId,
+    onboardingUrl: onboardingUrl,
+    currentlyDue: currentlyDue.slice(),
+    actions: []
+  };
+}
+
+function stripeReceivingSetupCard(profile: StripeReceivingProfile): StripeReceivingAccountCardData {
+  const validation = validateStripeReceivingProfile(profile);
+  const message = validation.ok ?
+    '为 ' + profile.displayName + ' 创建 Stripe Connect 收款账户。Stripe 会负责实名、税务和银行卡信息收集。' :
+    '请先配置 agent 收款资料：' + validation.reason;
+  return stripeReceivingCard(profile, profile.stripeAccountId.length > 0 ? profile.status : 'not_created', message);
+}
+
+function stripeReceivingConfigMissingCard(profile: StripeReceivingProfile, message: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'config_missing', message);
+}
+
+function stripeReceivingBlockedCard(profile: StripeReceivingProfile, message: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'blocked', message);
+}
+
+function stripeReceivingOnboardingCard(profile: StripeReceivingProfile, onboardingUrl: string): StripeReceivingAccountCardData {
+  return stripeReceivingCard(profile, 'onboarding_required', 'Stripe 收款账户已创建。请继续 Stripe 托管认证，完成实名、税务和银行卡资料。', onboardingUrl);
+}
+
+function stripeReceivingStatusCard(profile: StripeReceivingProfile, payload: StripeReceivingAccountStatusPayload): StripeReceivingAccountCardData {
+  const summary = mapStripeReceivingStatus(payload);
+  profile.stripeAccountId = payload.stripeAccountId.length > 0 ? payload.stripeAccountId : profile.stripeAccountId;
+  profile.status = summary.status;
+  return stripeReceivingCard(profile, summary.status, summary.message, '', payload.currentlyDue);
+}
+
+async function callLocalStripeReceivingTool(_prompt: string, surfaceId: string, actionId: string, args: Object | null = null): Promise<string> {
+  const profile = stripeReceivingProfileFromConfig(args);
+  if (localProviderConfig.stripeSecretKey.length === 0) {
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingConfigMissingCard(profile, '缺少 Stripe secret key。请先把 STRIPE_TEST_SECRET_KEY 或 STRIPE_LIVE_SECRET_KEY 同步进 HAP；AIPhone 不会模拟收款账户创建成功。'));
+  }
+  if (actionId === 'stripe.account.create') {
+    const validation = validateStripeReceivingProfile(profile);
+    if (!validation.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, validation.reason));
+    }
+    const created = await stripeConnectAccountCreator(localProviderConfig.stripeSecretKey, profile);
+    if (!created.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, created.error));
+    }
+    profile.stripeAccountId = created.stripeAccountId;
+    profile.status = 'onboarding_required';
+  }
+  if (actionId === 'stripe.account.create' || actionId === 'stripe.account.onboard') {
+    if (profile.stripeAccountId.length === 0) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, '缺少 Stripe connected account id。'));
+    }
+    const linkRequest: StripeConnectAccountIdRequest = { stripeAccountId: profile.stripeAccountId };
+    const link = await stripeConnectOnboardingLinkCreator(localProviderConfig.stripeSecretKey, linkRequest, localProviderConfig.stripeConnectReturnUrl, localProviderConfig.stripeConnectRefreshUrl);
+    if (!link.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, link.error));
+    }
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingOnboardingCard(profile, link.url));
+  }
+  if (profile.stripeAccountId.length > 0 && actionId === 'stripe.account.refresh') {
+    const statusRequest: StripeConnectAccountIdRequest = { stripeAccountId: profile.stripeAccountId };
+    const status = await stripeConnectStatusFetcher(localProviderConfig.stripeSecretKey, statusRequest);
+    if (!status.ok) {
+      return stripeReceivingAccountA2ui(surfaceId, stripeReceivingBlockedCard(profile, status.error));
+    }
+    return stripeReceivingAccountA2ui(surfaceId, stripeReceivingStatusCard(profile, status.payload));
+  }
+  return stripeReceivingAccountA2ui(surfaceId, stripeReceivingSetupCard(profile));
+}
+
+async function callLocalPaymentTool(_toolId: string, prompt: string, surfaceId: string, args: Object | null = null): Promise<string> {
+  const book = paymentAccountBookFromConfig();
+  const policy = paymentPolicyFromConfig();
+  const draft = paymentDraftFromArgs(prompt, args, book);
+  const validation = validatePaymentRequest(draft, book, policy);
+  const phase = draft.phase === undefined ? '' : draft.phase;
+  if (phase === 'cancel') {
+    return paymentCancelledA2ui(surfaceId, validation);
+  }
+  if (phase === 'capture') {
+    const parsed = paymentArgs(args);
+    if (validation.status !== 'confirm' || validation.targetType !== 'paypal') {
+      return paymentValidationA2ui(surfaceId, paymentBlocked(validation, 'PayPal capture requires a confirmed PayPal payment target.'));
+    }
+    return paymentValidationA2ui(surfaceId, await capturePayPalPayment(validation, paymentArgText(parsed, 'providerSessionId')));
+  }
+  if (phase !== 'confirm') {
+    return paymentValidationA2ui(surfaceId, validation);
+  }
+  if (validation.status !== 'confirm') {
+    return paymentValidationA2ui(surfaceId, validation);
+  }
+  let checkout: PaymentValidationResult;
+  if (validation.targetType === 'paypal') {
+    checkout = await createPayPalCheckout(validation);
+  } else if (validation.targetType === 'stripe_connected' || validation.targetType === 'stripe_payment_link') {
+    checkout = await createStripeCheckout(validation);
+  } else {
+    checkout = paymentBlocked(validation, 'Payment target is not executable.');
+  }
+  return paymentValidationA2ui(surfaceId, checkout);
+}
+
+async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: string, actionId: string, emitJsonl: LocalA2uiEmitter | null = null, args: Object | null = null): Promise<string> {
+  if (toolId === 'whatsapp.message.send') {
+    return callLocalWhatsAppTool(prompt, surfaceId, actionId, args);
+  }
   if (isCalendarToolId(toolId)) {
-    return callLocalCalendarTool(toolId, prompt, surfaceId, args);
+    return callLocalCalendarTool(toolId, prompt, surfaceId, actionId, args);
   }
   if (isMapsToolId(toolId)) {
     return callLocalMapsTool(toolId, prompt, surfaceId, args);
@@ -6486,15 +11802,23 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
   if (isYouTubeToolId(toolId)) {
     return callLocalYouTubeTool(toolId, prompt, surfaceId, args);
   }
-  if (toolId === 'social.reply.send') {
-    return errorA2ui(
-      surfaceId,
-      toolId,
-      '微信回复未发送',
-      'social.reply.send 已注册为真实本地动作，但当前 HAP 未接入可执行的微信辅助发送器；不会假装发送成功。',
-      ['缺少真实微信辅助发送执行器', '请先授权并接入通知/辅助桥接后重试'],
-      ['打开社交权限诊断']
-    );
+  if (isSocialHubToolId(toolId)) {
+    return callLocalSocialHubTool(toolId, prompt, surfaceId, args);
+  }
+  if (toolId === 'x.post.search') {
+    return callLocalXTool(toolId, prompt, surfaceId, args);
+  }
+  if (toolId === 'payment.account.setup') {
+    return callLocalStripeReceivingTool(prompt, surfaceId, actionId, args);
+  }
+  if (isPaymentToolId(toolId)) {
+    return callLocalPaymentTool(toolId, prompt, surfaceId, args);
+  }
+  if (isRideToolId(toolId)) {
+    return callLocalRideTool(toolId, prompt, surfaceId, args);
+  }
+  if (isLuckinToolId(toolId)) {
+    return callLocalLuckinTool(toolId, prompt, surfaceId, args);
   }
   if (toolId === 'travel.search') {
     return callLocalTravelSearch(prompt, surfaceId);
@@ -6506,9 +11830,9 @@ async function buildLocalToolJsonl(toolId: string, prompt: string, surfaceId: st
     return callLocalTrainSearch(prompt, surfaceId);
   }
   if (toolId === 'food.search') {
-    return callLocalFoodSearch(prompt, surfaceId, emitJsonl);
+    return callLocalFoodSearch(prompt, surfaceId, emitJsonl, args);
   }
-  return buildDynamicToolJsonl(toolId, prompt, surfaceId);
+  return buildDynamicToolJsonl(toolId, prompt, surfaceId, args);
 }
 
 async function callLocalTool(toolId: string, prompt: string, surfaceId: string, actionId: string, onSurface: A2uiSurfaceCallback, initialSurface: A2uiSurfaceState | null = null, args: Object | null = null): Promise<A2uiCallResult> {
@@ -6572,7 +11896,7 @@ async function callLocalTool(toolId: string, prompt: string, surfaceId: string, 
   }
 
   try {
-    const resultJsonl = await buildLocalToolJsonl(toolId, prompt, surfaceId, emitJsonl, args);
+    const resultJsonl = await buildLocalToolJsonl(toolId, prompt, surfaceId, actionId, emitJsonl, args);
     emitJsonl(resultJsonl);
     surfaceThrottle.flush();
     aiLogInfo('[AIPhone][LocalToolResult] ok=' + (streamError.length === 0 ? 'true' : 'false') + ' rawChars=' + rawResponse.length.toString());

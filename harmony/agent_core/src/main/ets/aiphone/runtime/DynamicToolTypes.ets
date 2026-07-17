@@ -1,4 +1,4 @@
-import { A2uiLabelValueData } from './A2uiTypes';
+import { A2uiAction, A2uiLabelValueData } from './A2uiTypes';
 
 export type DynamicToolTransportType = 'streamable_http' | 'sse' | 'stdio' | 'http_api' | 'unsupported';
 export type DynamicToolStatus = 'candidate' | 'enabled' | 'needs_auth' | 'preflight_failed' | 'unsupported_transport' | 'unsafe_action_blocked';
@@ -27,10 +27,19 @@ export interface DynamicToolTransport {
   forecastQuery?: string;
 }
 
+export interface McpToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 export interface DynamicMcpTool {
   name: string;
   description: string;
   inputSchema: Object;
+  annotations?: McpToolAnnotations;
 }
 
 export interface DynamicToolManifest {
@@ -74,6 +83,7 @@ export interface DynamicGenericToolResult {
   summary: string;
   rows: A2uiLabelValueData[];
   rawPreview: string;
+  actions?: A2uiAction[];
 }
 
 export interface ModelScopeSchemaProperty {

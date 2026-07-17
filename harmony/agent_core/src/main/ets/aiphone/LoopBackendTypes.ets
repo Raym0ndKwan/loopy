@@ -15,11 +15,13 @@ export interface LoopMessage {
 
 export interface LoopBackendRequest {
   prompt: string;
+  userPrompt?: string;
   history: LoopMessage[];
   modelSettings: LoopModelSettings;
   surfaceId: string;
   actionId: string;
   args?: Object;
+  persona?: Object;
   maxSteps: number;
 }
 

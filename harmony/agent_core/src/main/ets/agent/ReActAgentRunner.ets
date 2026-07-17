@@ -1,4 +1,5 @@
 import { AgentEvent, AgentEventKind } from './AgentEvent';
+import { summarizeA2uiObservation } from './A2uiObservationDigest';
 import { ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
@@ -11,6 +12,19 @@ export type UiRenderHandler = (description: string) => Promise<string[]>;
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
 const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
+
+function padDatePart(value: number): string {
+  return value < 10 ? '0' + value.toString() : value.toString();
+}
+
+function currentLocalDateTime(now: Date = new Date()): string {
+  const offsetMinutes = -now.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? '+' : '-';
+  const absoluteOffset = Math.abs(offsetMinutes);
+  return now.getFullYear().toString() + '-' + padDatePart(now.getMonth() + 1) + '-' + padDatePart(now.getDate()) +
+    'T' + padDatePart(now.getHours()) + ':' + padDatePart(now.getMinutes()) + ':' + padDatePart(now.getSeconds()) +
+    sign + padDatePart(Math.floor(absoluteOffset / 60)) + ':' + padDatePart(absoluteOffset % 60);
+}
 
 class ToolCall {
   name: string;
@@ -98,9 +112,23 @@ export class ReActAgentRunner {
         return;
       }
 
+      const digest = summarizeA2uiObservation(observation);
+      const observationForModel = digest.isA2ui ? digest.text : `Observation: ${observation}`;
       scratchpad.push(response);
-      scratchpad.push(`Observation: ${observation}`);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
+      scratchpad.push(observationForModel);
+      listener(new AgentEvent(AgentEventKind.OBSERVATION, observationForModel));
+
+      if (digest.isA2ui && digest.shouldStop) {
+        if (digest.failureKey.indexOf(':error') >= 0) {
+          listener(new AgentEvent(AgentEventKind.FINAL, '工具执行失败，结果已更新到主页。'));
+        } else if (digest.failureKey.length > 0) {
+          listener(new AgentEvent(AgentEventKind.FINAL, '需要用户确认或授权，工具结果已更新到主页。'));
+        } else {
+          listener(new AgentEvent(AgentEventKind.FINAL,
+            digest.finalText.length > 0 ? digest.finalText : '工具结果已更新到主页。'));
+        }
+        return;
+      }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
@@ -141,23 +169,20 @@ export class ReActAgentRunner {
 
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
+    prompt += 'Current device local datetime: ' + currentLocalDateTime() + '. Resolve relative dates yourself before calling tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'Every tool call must use exactly this syntax on one line: Action: tool_name[input]. The tool name is mandatory; never put raw JSON directly after Action:.\n';
+    prompt += 'When an Action needs parameters, pass a JSON object in parentheses, for example Action: tool.name({"query":"value"}); use normal JSON arrays like ["a@example.com"], and do not pass bare keywords.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
     } else {
       prompt += 'Do not call ui unless it is listed in Tools. If a tool observation already contains UI or protocol output, return Final with a concise summary.\n';
     }
     prompt += 'When tools expose risk labels, prefer read or draft tools over blocked tools. Use blocked tools only when the user explicitly asks to bypass review or confirmation.\n';
-    prompt += 'Call composio only when the user request needs one of the authorized toolkits listed in its description. Do not call it for unrelated requests.\n';
-    prompt += 'Composio requires two phases: after operation=search returns schemas, call composio again with operation=execute. Do not return Final until execute returns business data or an error.\n';
-    prompt += 'Call modelscope only when the request can use an activated ModelScope MCP. ModelScope requires two phases: first Action: modelscope[{"operation":"search","useCase":"full task"}], then Action: modelscope[{"operation":"execute","qualifiedName":"returned name","arguments":{...}}] with arguments matching inputSchema.\n';
-    prompt += 'When a tool schema needs an exact date and the user says tomorrow, the day after tomorrow, 明天, or 后天, resolve it to YYYY-MM-DD using the time tool or a returned date tool before executing the business tool.\n';
-    prompt += 'Never invent a ModelScope qualifiedName or execute one not returned by search. After a successful ModelScope execution, return Final instead of searching or calling display-only tools.\n';
-    prompt += 'After a successful data-returning domain-tool observation, do not call a display-only tool; return Final.\n';
-    if (this.skillSnapshot !== null && !this.skillSnapshot.isEmpty() && !this.skillsInSystemPrompt) {
-      prompt += 'Use Action: read[skill_name] to load skill instructions before following them.\n';
-      prompt += 'For skill creation requests, read skill_creator first, then use write_sandbox_file for skills/{skill_name}/SKILL.md.\n';
+    prompt += 'If a tool observation already contains UI or A2UI protocol output, return Final; the visible result is already on screen.\n';
+    prompt += 'Tools that require confirmation, user input, blocked actions, sending, payment, or irreversible writes must stop for user confirmation instead of bypassing review.\n';
+    if (this.tools.has('modelscope')) {
+      prompt += 'Call modelscope only for an activated ModelScope MCP. First call modelscope with operation=search and the full task; then execute one returned qualifiedName whose risk is read.\n';
+      prompt += 'Never invent a ModelScope qualifiedName. If ModelScope blocks an unsafe or unannotated tool, stop and explain that a real confirmation flow is required.\n';
     }
     prompt += 'Use other tools or Final for plain text answers.\n\n';
 
@@ -247,37 +272,16 @@ export class ReActAgentRunner {
       return null;
     }
 
-    const bracketCall = this.parseDelimitedAction(action, '[', ']');
-    if (bracketCall !== null) {
-      return bracketCall;
-    }
-
     const parenCall = this.parseDelimitedAction(action, '(', ')');
     if (parenCall !== null) {
       return parenCall;
     }
 
-    const jsonCall = this.parseJsonAction(action);
-    if (jsonCall !== null) {
-      return jsonCall;
+    const bracketCall = this.parseDelimitedAction(action, '[', ']');
+    if (bracketCall !== null) {
+      return bracketCall;
     }
 
-    return null;
-  }
-
-  private parseJsonAction(action: string): ToolCall | null {
-    const trimmed = action.trim();
-    if (!trimmed.startsWith('{')) {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
-      const operation = `${parsed.operation ?? ''}`;
-      if (operation === 'search' || operation === 'execute') {
-        return new ToolCall('modelscope', trimmed);
-      }
-    } catch (_error) {
-    }
     return null;
   }
 

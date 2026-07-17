@@ -1,6 +1,6 @@
 import http from '@ohos.net.http';
 import { ChatMessage, ConversationContext } from '../agent/ConversationContext';
-import { buildLoopSystemPrompt, SkillSnapshot } from '../skill/SkillSnapshot';
+import { buildSkillsSection, SkillSnapshot } from '../skill/SkillSnapshot';
 import { LocalModel } from './LocalModel';
 import { LlmProvider } from './LlmProvider';
 
@@ -114,7 +114,7 @@ export class OpenAiCompatibleModel implements LocalModel {
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: buildLoopSystemPrompt(this.skillSnapshot)
+        content: this.systemPrompt()
       }
     ];
 
@@ -135,6 +135,15 @@ export class OpenAiCompatibleModel implements LocalModel {
       messages,
       temperature: 0.2
     };
+  }
+
+  private systemPrompt(): string {
+    let content = 'You are Loop, a concise ReAct agent on HarmonyOS. Reply with Thought and either Action: tool(JSON object) or Final: answer. Use only listed tools and follow the tool-routing rules in the prompt exactly.';
+    const skills = buildSkillsSection(this.skillSnapshot);
+    if (skills.length > 0) {
+      content += `\n\n${skills}`;
+    }
+    return content;
   }
 
   private buildRequestJson(prompt: string, conversation?: ConversationContext): string {
