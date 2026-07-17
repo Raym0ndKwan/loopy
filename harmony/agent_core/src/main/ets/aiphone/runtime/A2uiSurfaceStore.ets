@@ -2,6 +2,7 @@ import {
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiApplyResult,
+  A2uiAction,
   A2uiComponent,
   A2uiDataValue,
   A2uiDynamicToolConnectData,
@@ -12,19 +13,29 @@ import {
   A2uiGenericToolResultRowData,
   A2uiLabelValueData,
   A2uiEnvelope,
+  A2uiPersonaData,
+  A2uiPersonaMemoryData,
   A2uiRowGroupsData,
   A2uiRuntimeDataModel,
   A2uiSummaryData,
-  A2uiSocialData,
-  A2uiSocialMessageData,
-  A2uiSocialReplyData,
   A2uiSurfaceState,
   A2uiToolRequestData,
   A2uiTravelOptionData,
   A2uiTrainData,
   A2uiTripData,
+  StripeReceivingAccountCardData,
   emptyA2uiSurface
 } from './A2uiTypes';
+import {
+  emptySocialHub,
+  normalizeSocialHub,
+  normalizeSocialHubConnection,
+  normalizeSocialHubDraft,
+  normalizeSocialHubItem,
+  SocialHubConnectionData,
+  SocialHubItemData
+} from './SocialHubTypes';
+import { AggregateSearchResult, emptyAggregateSearchResult } from './AggregateSearchTypes';
 
 function cloneComponents(values: A2uiComponent[]): A2uiComponent[] {
   const next: A2uiComponent[] = [];
@@ -77,7 +88,6 @@ function emptyDataModel(): A2uiRuntimeDataModel {
     flights: [],
     travelOptions: [],
     foods: [],
-    social: emptySocial(),
     thoughts: [],
     summary: {
       text: '',
@@ -96,15 +106,47 @@ function emptyDataModel(): A2uiRuntimeDataModel {
       actionId: ''
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
-    genericToolResults: []
+    genericToolResults: [],
+    aggregateSearch: emptyAggregateSearchResult(),
+    socialHub: emptySocialHub(),
+    persona: emptyPersona(),
+    personaMemory: emptyPersonaMemory(),
+    stripeReceivingAccount: emptyStripeReceivingAccount()
   };
 }
 
-function emptySocial(): A2uiSocialData {
+function emptyStripeReceivingAccount(): StripeReceivingAccountCardData {
   return {
-    messages: [],
-    replies: [],
-    diagnostics: []
+    status: '',
+    title: '',
+    message: '',
+    agentId: '',
+    deviceId: '',
+    displayName: '',
+    email: '',
+    country: '',
+    businessType: '',
+    stripeAccountId: '',
+    onboardingUrl: '',
+    currentlyDue: [],
+    actions: []
+  };
+}
+
+function emptyPersona(): A2uiPersonaData {
+  return {
+    id: '',
+    name: '',
+    avatarKey: '',
+    status: '',
+    reason: ''
+  };
+}
+
+function emptyPersonaMemory(): A2uiPersonaMemoryData {
+  return {
+    summary: '',
+    preferences: []
   };
 }
 
@@ -167,6 +209,7 @@ interface LooseGenericToolResultData {
   summary?: Object | string | number | boolean | null;
   rows?: Object[];
   rawPreview?: Object | string | number | boolean | null;
+  actions?: A2uiAction[];
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -356,7 +399,7 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       continue;
     }
     const result = source as LooseGenericToolResultData;
-    normalized.push({
+    const normalizedResult: A2uiGenericToolResultData = {
       sourceTag: textOf(result.sourceTag),
       toolName: textOf(result.toolName),
       title: textOf(result.title),
@@ -364,9 +407,34 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       summary: textOf(result.summary),
       rows: normalizeGenericToolResultRows(result.rows),
       rawPreview: textOf(result.rawPreview)
-    });
+    };
+    if (Array.isArray(result.actions)) {
+      normalizedResult.actions = result.actions;
+    }
+    normalized.push(normalizedResult);
   }
   return normalized;
+}
+
+function normalizeStripeReceivingAccount(parsed: A2uiRuntimeDataModel, fallback: StripeReceivingAccountCardData): StripeReceivingAccountCardData {
+  if (parsed.stripeReceivingAccount === undefined || parsed.stripeReceivingAccount === null) {
+    return fallback;
+  }
+  return {
+    status: textOf(parsed.stripeReceivingAccount.status),
+    title: textOf(parsed.stripeReceivingAccount.title),
+    message: textOf(parsed.stripeReceivingAccount.message),
+    agentId: textOf(parsed.stripeReceivingAccount.agentId),
+    deviceId: textOf(parsed.stripeReceivingAccount.deviceId),
+    displayName: textOf(parsed.stripeReceivingAccount.displayName),
+    email: textOf(parsed.stripeReceivingAccount.email),
+    country: textOf(parsed.stripeReceivingAccount.country),
+    businessType: textOf(parsed.stripeReceivingAccount.businessType),
+    stripeAccountId: textOf(parsed.stripeReceivingAccount.stripeAccountId),
+    onboardingUrl: textOf(parsed.stripeReceivingAccount.onboardingUrl),
+    currentlyDue: stringArrayFromDataValue(parsed.stripeReceivingAccount.currentlyDue),
+    actions: Array.isArray(parsed.stripeReceivingAccount.actions) ? parsed.stripeReceivingAccount.actions : []
+  };
 }
 
 function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroupsData): A2uiRowGroupsData {
@@ -380,14 +448,26 @@ function normalizeRowGroups(parsed: A2uiRuntimeDataModel, fallback: A2uiRowGroup
   };
 }
 
-function normalizeSocial(parsed: A2uiRuntimeDataModel, fallback: A2uiSocialData): A2uiSocialData {
-  if (parsed.social === undefined || parsed.social === null) {
+function normalizePersona(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaData): A2uiPersonaData {
+  if (parsed.persona === undefined || parsed.persona === null) {
     return fallback;
   }
   return {
-    messages: Array.isArray(parsed.social.messages) ? parsed.social.messages : fallback.messages,
-    replies: Array.isArray(parsed.social.replies) ? parsed.social.replies : fallback.replies,
-    diagnostics: Array.isArray(parsed.social.diagnostics) ? parsed.social.diagnostics : fallback.diagnostics
+    id: textOf(parsed.persona.id),
+    name: textOf(parsed.persona.name),
+    avatarKey: textOf(parsed.persona.avatarKey),
+    status: textOf(parsed.persona.status),
+    reason: textOf(parsed.persona.reason)
+  };
+}
+
+function normalizePersonaMemory(parsed: A2uiRuntimeDataModel, fallback: A2uiPersonaMemoryData): A2uiPersonaMemoryData {
+  if (parsed.personaMemory === undefined || parsed.personaMemory === null) {
+    return fallback;
+  }
+  return {
+    summary: textOf(parsed.personaMemory.summary),
+    preferences: stringArrayFromDataValue(parsed.personaMemory.preferences)
   };
 }
 
@@ -401,7 +481,6 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       flights: Array.isArray(parsed.flights) ? parsed.flights : fallback.flights,
       travelOptions: Array.isArray(parsed.travelOptions) ? parsed.travelOptions : fallback.travelOptions,
       foods: Array.isArray(parsed.foods) ? parsed.foods : fallback.foods,
-      social: normalizeSocial(parsed, fallback.social),
       thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : fallback.thoughts,
       summary: parsed.summary === undefined || parsed.summary === null ? fallback.summary : parsed.summary,
       trip: parsed.trip === undefined || parsed.trip === null ? fallback.trip : {
@@ -412,6 +491,11 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
+      aggregateSearch: parsed.aggregateSearch === undefined || parsed.aggregateSearch === null ? fallback.aggregateSearch : parsed.aggregateSearch,
+      socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
+      persona: normalizePersona(parsed, fallback.persona),
+      personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
+      stripeReceivingAccount: normalizeStripeReceivingAccount(parsed, fallback.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : fallback.stripeReceivingAccount),
       toolRequests: Array.isArray(parsed.toolRequests) ? parsed.toolRequests : []
     };
   } catch (_error) {
@@ -494,14 +578,6 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.travelOptions = value as A2uiTravelOptionData[];
   } else if (path === '/foods') {
     next.foods = value as A2uiFoodData[];
-  } else if (path === '/social') {
-    next.social = value as A2uiSocialData;
-  } else if (path === '/social/messages') {
-    next.social.messages = value as A2uiSocialMessageData[];
-  } else if (path === '/social/replies') {
-    next.social.replies = value as A2uiSocialReplyData[];
-  } else if (path === '/social/diagnostics') {
-    next.social.diagnostics = labelRowsFromDataValue(value);
   } else if (path === '/thoughts') {
     const incoming = value as string[];
     const existingJoined = next.thoughts.join('');
@@ -542,6 +618,36 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.dynamicToolConnect = value as A2uiDynamicToolConnectData;
   } else if (path === '/genericToolResults') {
     next.genericToolResults = value as A2uiGenericToolResultData[];
+  } else if (path === '/aggregateSearch') {
+    next.aggregateSearch = value as AggregateSearchResult;
+  } else if (path === '/persona') {
+    next.persona = value as A2uiPersonaData;
+  } else if (path === '/personaMemory') {
+    next.personaMemory = value as A2uiPersonaMemoryData;
+  } else if (path === '/stripeReceivingAccount') {
+    next.stripeReceivingAccount = value as StripeReceivingAccountCardData;
+  } else if (path === '/socialHub') {
+    next.socialHub = normalizeSocialHub(value as Object, next.socialHub);
+  } else if (path === '/socialHub/items') {
+    const items: SocialHubItemData[] = [];
+    if (Array.isArray(value)) {
+      (value as Object[]).forEach((item: Object) => {
+        items.push(normalizeSocialHubItem(item));
+      });
+    }
+    next.socialHub.items = items;
+  } else if (path === '/socialHub/selected') {
+    next.socialHub.selected = normalizeSocialHubItem(value as Object);
+  } else if (path === '/socialHub/draft') {
+    next.socialHub.draft = normalizeSocialHubDraft(value as Object);
+  } else if (path === '/socialHub/connections') {
+    const connections: SocialHubConnectionData[] = [];
+    if (Array.isArray(value)) {
+      (value as Object[]).forEach((connection: Object) => {
+        connections.push(normalizeSocialHubConnection(connection));
+      });
+    }
+    next.socialHub.connections = connections;
   } else if (path === '/toolRequests') {
     const requests = value as A2uiToolRequestData[];
     next.toolRequests = requests;
@@ -628,10 +734,16 @@ export class A2uiSurfaceStore {
           'general' : envelope.createSurface.intent;
         const nextStatus = envelope.createSurface.status === undefined || envelope.createSurface.status.length === 0 ?
           'thinking' : envelope.createSurface.status;
-        const preservedThoughts = parseDataModel(this.surface.dataModelJson).thoughts;
+        const currentModel = parseDataModel(this.surface.dataModelJson);
+        const preservedThoughts = currentModel.thoughts;
+        const preservedPersona = currentModel.persona;
+        const preservedPersonaMemory = currentModel.personaMemory;
         if (this.surface.surfaceId === nextSurfaceId && this.surface.components.length > 0) {
           if (envelope.createSurface.sendDataModel === true && nextStatus === 'calling_tool') {
-            this.surface.dataModelJson = JSON.stringify(emptyDataModel());
+            const resetModel = emptyDataModel();
+            resetModel.persona = preservedPersona;
+            resetModel.personaMemory = preservedPersonaMemory;
+            this.surface.dataModelJson = JSON.stringify(resetModel);
           }
           this.surface.rootId = nextRootId;
           this.surface.title = nextTitle;
@@ -645,6 +757,8 @@ export class A2uiSurfaceStore {
         if (preservedThoughts.length > 0) {
           nextDataModel.thoughts = preservedThoughts;
         }
+        nextDataModel.persona = preservedPersona;
+        nextDataModel.personaMemory = preservedPersonaMemory;
         this.surface = {
           surfaceId: nextSurfaceId,
           rootId: nextRootId,

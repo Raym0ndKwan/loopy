@@ -1,13 +1,17 @@
 import http from '@ohos.net.http';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ComposioConfig } from './ComposioConfig';
+import { bindComposioPhysicalNetwork, ComposioNetworkLease, restoreComposioNetwork } from './ComposioNetwork';
+import { normalizeComposioAuthConfigsResponse } from './ComposioAuthClient';
 
 const LOG_DOMAIN: number = 0x1200;
 const LOG_TAG: string = 'LoopComposio';
 const CONNECT_TIMEOUT_MS: number = 15000;
 const READ_TIMEOUT_MS: number = 30000;
-const MAX_OBSERVATION_CHARS: number = 16000;
+const MAX_OBSERVATION_CHARS: number = 200000;
 const MAX_ACCOUNT_PAGES: number = 10;
+const MAX_SEARCH_DESCRIPTION_CHARS: number = 600;
+const MAX_SEARCH_SCHEMA_CHARS: number = 3000;
 
 interface ConnectedAccountToolkit {
   slug?: string;
@@ -25,6 +29,8 @@ interface ConnectedAccountsResponse {
   items?: ConnectedAccount[];
   next_cursor?: string;
 }
+
+type ToolkitAccountMap = Record<string, string>;
 
 interface SessionToolkits {
   enable: string[];
@@ -123,8 +129,73 @@ interface ComposioErrorResponse {
   request_id?: string;
 }
 
+function safeText(value: Object | string | number | boolean | null | undefined): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value.toString();
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (_error) {
+    return `${value}`;
+  }
+}
+
+export function describeComposioFailure(error: Error | Object | string): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  const record = error as Record<string, Object | string | number | boolean | null | undefined>;
+  const directMessage = safeText(record.message).trim();
+  if (directMessage.length > 0) {
+    return directMessage;
+  }
+  const directError = safeText(record.error).trim();
+  if (directError.length > 0) {
+    return directError;
+  }
+  return safeText(error);
+}
+
+export function proxyToolkitAccountsFromAuthConfigs(payload: Object, toolkitAllowlist: string[] = []): ToolkitAccountMap {
+  const allowed: string[] = [];
+  toolkitAllowlist.forEach((toolkit: string) => {
+    const slug = toolkit.trim().toLowerCase();
+    if (slug.length > 0 && allowed.indexOf(slug) < 0) {
+      allowed.push(slug);
+    }
+  });
+  const result: ToolkitAccountMap = {};
+  const normalized = normalizeComposioAuthConfigsResponse(payload);
+  for (let index = 0; index < normalized.items.length; index++) {
+    const item = normalized.items[index];
+    const toolkit = item.toolkitSlug.trim().toLowerCase();
+    const accountId = item.connectedAccountId.trim();
+    if (toolkit.length === 0 || accountId.length === 0 || item.canExecute !== true ||
+      item.status.trim().toLowerCase() !== 'connected') {
+      continue;
+    }
+    if (allowed.length > 0 && allowed.indexOf(toolkit) < 0) {
+      continue;
+    }
+    if (result[toolkit] === undefined) {
+      result[toolkit] = accountId;
+    }
+  }
+  return result;
+}
+
 export class ComposioSessionClient {
   private config: ComposioConfig;
+  private toolkitAllowlist: string[] = [];
   private toolkitAccounts: Map<string, string> = new Map();
   private discoveryError: string = '';
   private initialized: boolean = false;
@@ -132,8 +203,14 @@ export class ComposioSessionClient {
   private sessionPromise: Promise<string> | null = null;
   private discoveredTools: Set<string> = new Set();
 
-  constructor(config: ComposioConfig) {
+  constructor(config: ComposioConfig, toolkitAllowlist: string[] = []) {
     this.config = config;
+    toolkitAllowlist.forEach((toolkit: string) => {
+      const slug = toolkit.trim().toLowerCase();
+      if (slug.length > 0 && this.toolkitAllowlist.indexOf(slug) < 0) {
+        this.toolkitAllowlist.push(slug);
+      }
+    });
   }
 
   async initialize(): Promise<void> {
@@ -145,14 +222,28 @@ export class ComposioSessionClient {
       this.discoveryError = `Composio 未配置：${this.config.missingConfiguration()}`;
       return;
     }
+    if (this.canUseAuthlessSession()) {
+      return;
+    }
     try {
+      this.discoveryError = '';
+      this.toolkitAccounts.clear();
       await this.discoverConnectedAccounts();
       if (this.toolkitAccounts.size === 0) {
         this.discoveryError = `Composio 用户 ${this.config.userId} 没有 ACTIVE connected account`;
       }
     } catch (error) {
       this.discoveryError = this.safeFailure('发现授权 Toolkit', error);
+      this.initialized = false;
     }
+  }
+
+  private allowsToolkit(toolkit: string): boolean {
+    return this.toolkitAllowlist.length === 0 || this.toolkitAllowlist.indexOf(toolkit) >= 0;
+  }
+
+  private canUseAuthlessSession(): boolean {
+    return this.toolkitAllowlist.length === 1 && this.toolkitAllowlist[0] === 'hackernews';
   }
 
   toolDescription(): string {
@@ -232,6 +323,11 @@ export class ComposioSessionClient {
   }
 
   private async discoverConnectedAccounts(): Promise<void> {
+    if (this.config.proxyBaseUrl.length > 0) {
+      await this.discoverProxyConnectedAccounts();
+      hilog.info(LOG_DOMAIN, LOG_TAG, 'authorized toolkits=%{public}d', this.toolkitAccounts.size);
+      return;
+    }
     let cursor = '';
     for (let page = 0; page < MAX_ACCOUNT_PAGES; page++) {
       let path = `/connected_accounts?user_ids=${encodeURIComponent(this.config.userId)}` +
@@ -254,7 +350,8 @@ export class ComposioSessionClient {
         const account = items[index];
         const toolkit = account.toolkit?.slug?.trim().toLowerCase() ?? '';
         const accountId = account.id?.trim() ?? '';
-        if (toolkit.length === 0 || accountId.length === 0 || account.is_disabled === true) {
+        if (toolkit.length === 0 || accountId.length === 0 || account.is_disabled === true ||
+          !this.allowsToolkit(toolkit)) {
           continue;
         }
         if (!this.toolkitAccounts.has(toolkit)) {
@@ -269,12 +366,35 @@ export class ComposioSessionClient {
     hilog.info(LOG_DOMAIN, LOG_TAG, 'authorized toolkits=%{public}d', this.toolkitAccounts.size);
   }
 
+  private async discoverProxyConnectedAccounts(): Promise<void> {
+    const response = await this.request(
+      http.RequestMethod.GET,
+      `/v1/composio/auth-configs?userId=${encodeURIComponent(this.config.userId)}`,
+      ''
+    );
+    if (!this.isSuccess(response.code)) {
+      throw new Error(this.httpError('查询 Auth Configs', response));
+    }
+    let parsed: Object;
+    try {
+      parsed = JSON.parse(response.text) as Object;
+    } catch (_error) {
+      throw new Error('Composio Auth Configs 返回了非 JSON 响应');
+    }
+    const accounts = proxyToolkitAccountsFromAuthConfigs(parsed, this.toolkitAllowlist);
+    Object.keys(accounts).forEach((toolkit: string) => {
+      if (!this.toolkitAccounts.has(toolkit)) {
+        this.toolkitAccounts.set(toolkit, accounts[toolkit]);
+      }
+    });
+  }
+
   private async ensureSession(): Promise<string> {
     await this.initialize();
     if (this.sessionId.length > 0) {
       return this.sessionId;
     }
-    if (this.toolkitAccounts.size === 0) {
+    if (this.toolkitAccounts.size === 0 && !this.canUseAuthlessSession()) {
       throw new Error(this.discoveryError.length > 0 ? this.discoveryError : 'Composio 没有已授权 Toolkit');
     }
     if (this.sessionPromise === null) {
@@ -356,8 +476,8 @@ export class ComposioSessionClient {
       const schema = schemas[slug] ?? schemas[normalized];
       candidates.push({
         toolSlug: normalized,
-        description: schema?.description ?? '',
-        inputSchema: schema?.input_schema === undefined ? '{}' : JSON.stringify(schema.input_schema)
+        description: (schema?.description ?? '').substring(0, MAX_SEARCH_DESCRIPTION_CHARS),
+        inputSchema: this.searchSchemaText(schema?.input_schema)
       });
     });
     if (candidates.length === 0) {
@@ -372,11 +492,22 @@ export class ComposioSessionClient {
     return this.limitObservation(JSON.stringify(observation));
   }
 
+  private searchSchemaText(schema: Object | undefined): string {
+    if (schema === undefined) {
+      return '{}';
+    }
+    const text = JSON.stringify(schema);
+    return text.length > MAX_SEARCH_SCHEMA_CHARS ? '{}' : text;
+  }
+
   private authorizedToolkits(): string[] {
     const result: string[] = [];
     this.toolkitAccounts.forEach((_accountId: string, toolkit: string) => {
       result.push(toolkit);
     });
+    if (result.length === 0 && this.canUseAuthlessSession()) {
+      return ['hackernews'];
+    }
     result.sort();
     return result;
   }
@@ -390,18 +521,52 @@ export class ComposioSessionClient {
     }
   }
 
+  private requestBaseUrl(): string {
+    return this.config.proxyBaseUrl.length > 0 ? this.config.proxyBaseUrl : this.config.baseUrl;
+  }
+
+  private requestPath(path: string): string {
+    if (this.config.proxyBaseUrl.length === 0) {
+      return path;
+    }
+    if (path === '/tool_router/session') {
+      return '/v1/composio/session';
+    }
+    if (path.startsWith('/tool_router/session/')) {
+      return '/v1/composio/session/' + path.substring('/tool_router/session/'.length);
+    }
+    return path;
+  }
+
+  private requestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Accept': 'application/json'
+    };
+    if (this.config.proxyBaseUrl.length > 0) {
+      if (this.config.proxyApiKey.length > 0) {
+        headers.Authorization = 'Bearer ' + this.config.proxyApiKey;
+      }
+      return headers;
+    }
+    headers['x-api-key'] = this.config.apiKey;
+    return headers;
+  }
+
   private async request(method: http.RequestMethod, path: string, body: string): Promise<HttpResult> {
     const request = http.createHttp();
-    const url = `${this.config.baseUrl}${path}`;
+    let networkLease: ComposioNetworkLease | null = null;
+    const requestPath = this.requestPath(path);
+    const url = `${this.requestBaseUrl()}${requestPath}`;
     hilog.info(LOG_DOMAIN, LOG_TAG, 'request method=%{public}s path=%{public}s', `${method}`, path);
     try {
+      if (this.config.proxyBaseUrl.length === 0) {
+        networkLease = await bindComposioPhysicalNetwork();
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'physical network bound=%{public}s', networkLease.bound ? 'true' : 'false');
+      }
       const response = await request.request(url, {
         method: method,
-        header: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Accept': 'application/json',
-          'x-api-key': this.config.apiKey
-        },
+        header: this.requestHeaders(),
         extraData: body,
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: CONNECT_TIMEOUT_MS,
@@ -415,6 +580,10 @@ export class ComposioSessionClient {
       return result;
     } finally {
       request.destroy();
+      if (networkLease !== null) {
+        await restoreComposioNetwork(networkLease);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'restored app network');
+      }
     }
   }
 
@@ -460,7 +629,7 @@ export class ComposioSessionClient {
   }
 
   private safeFailure(action: string, error: Error | Object | string): string {
-    const message = error instanceof Error ? error.message : `${error}`;
+    const message = describeComposioFailure(error);
     return `Composio ${action}失败：${message}`;
   }
 

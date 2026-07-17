@@ -1,5 +1,6 @@
 import {
   A2UI_COMPONENT_ACTION_BAR,
+  A2UI_COMPONENT_AGGREGATE_SEARCH,
   A2UI_COMPONENT_COLUMN,
   A2UI_COMPONENT_CONFIRM_PANEL,
   A2UI_COMPONENT_ERROR_NOTICE,
@@ -8,7 +9,8 @@ import {
   A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_ROW,
-  A2UI_COMPONENT_SOCIAL_INBOX,
+  A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2UI_COMPONENT_TEXT,
   A2UI_COMPONENT_THINKING_STREAM,
@@ -35,11 +37,13 @@ const KNOWN_COMPONENTS: string[] = [
   A2UI_COMPONENT_FLIGHT_BOARD,
   A2UI_COMPONENT_TRAVEL_OPTIONS,
   A2UI_COMPONENT_FOOD_CHOICES,
-  A2UI_COMPONENT_SOCIAL_INBOX,
   A2UI_COMPONENT_CONFIRM_PANEL,
   A2UI_COMPONENT_INFO_ROWS,
   A2UI_COMPONENT_TOOL_CONNECT_CARD,
-  A2UI_COMPONENT_GENERIC_TOOL_RESULTS
+  A2UI_COMPONENT_GENERIC_TOOL_RESULTS,
+  A2UI_COMPONENT_SOCIAL_HUB,
+  A2UI_COMPONENT_STRIPE_RECEIVING_ACCOUNT_CARD,
+  A2UI_COMPONENT_AGGREGATE_SEARCH
 ];
 
 function normalizeString(value: string | Object | undefined | null, fallback: string): string {
@@ -94,13 +98,17 @@ function normalizeActions(value: A2uiAction[] | undefined | null): A2uiAction[] 
     if (variant !== 'primary' && variant !== 'secondary' && variant !== 'danger') {
       throw new Error('A2UI action variant is not registered');
     }
-    result.push({
+    const normalized: A2uiAction = {
       id: normalizeString(action.id, 'action_' + index.toString()),
       label: label,
       prompt: prompt,
       variant: variant,
       kind: kind
-    });
+    };
+    if (action.args !== undefined && action.args !== null) {
+      normalized.args = action.args;
+    }
+    result.push(normalized);
   });
   return result;
 }

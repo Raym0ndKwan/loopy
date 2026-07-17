@@ -107,10 +107,15 @@ ignored by Git):
 }
 ```
 
-The phone calls ModelScope's operational MCP API itself, lists the activated Hosted MCP tools, and
-directly calls each Streamable HTTP MCP endpoint. This packages the ModelScope token into the app
-rawfile and executes discovered tools immediately, so it is for internal demos only and must not be
-shipped as a production architecture.
+The phone calls ModelScope's operational MCP API, lists only the account's activated Hosted MCP
+tools, and reuses the shared `GenericMcpClient` for Streamable HTTP `tools/list` and `tools/call`.
+Search and execute are separate phases: execute accepts only a `qualifiedName` returned by the most
+recent search. The demo executes only tools whose MCP annotations explicitly declare
+`readOnlyHint: true` and do not declare `destructiveHint: true`; unannotated, write, and destructive
+tools are blocked until a real confirmation flow exists.
+
+The token is still packaged into the app rawfile, so this direct mode is for internal demos only.
+Do not commit `modelscope_config.json` or ship this credential layout as a production architecture.
 
 ## Source layout
 

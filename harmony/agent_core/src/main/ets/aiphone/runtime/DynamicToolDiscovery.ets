@@ -51,7 +51,7 @@ function queryTerms(query: string): string[] {
   const normalized = query.toLowerCase();
   const terms: string[] = [];
   const candidates: string[] = [
-    '天气', '气温', '降雨', '下雨', 'weather', 'forecast',
+    '天气', '气温', '降雨', '下雨',
     '统计局', 'gdp', 'cpi', '人口', '经济数据',
     'ppt', '幻灯片', '演示文稿',
     '地图', '高德', '百度',

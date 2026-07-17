@@ -1,5 +1,3 @@
-import { AgentTool } from './AgentTool';
-import { UiTool } from './UiTool';
 import { common } from '@kit.AbilityKit';
 import { ComposioConfig } from '../composio/ComposioConfig';
 import { ComposioSessionClient } from '../composio/ComposioSessionClient';
@@ -10,6 +8,8 @@ import { ModelScopeDirectClient } from '../modelscope/ModelScopeDirectClient';
 import { ModelScopeTool } from '../modelscope/ModelScopeTool';
 import { SkillReadTool } from '../skill/SkillReadTool';
 import { SkillSnapshot } from '../skill/SkillSnapshot';
+import { AgentTool } from './AgentTool';
+import { UiTool } from './UiTool';
 
 export type ToolRegistryCloseHandler = () => Promise<void>;
 
@@ -53,6 +53,10 @@ export class ToolRegistry {
 
   register(tool: AgentTool): void {
     this.tools.set(tool.name(), tool);
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
   }
 
   registerCloseHandler(handler: ToolRegistryCloseHandler): void {

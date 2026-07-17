@@ -1,8 +1,14 @@
 import http from '@ohos.net.http';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import {
+  DynamicGenericToolResult,
+  DynamicMcpTool,
+  DynamicToolRegistration,
+  McpToolAnnotations
+} from '../aiphone/runtime/DynamicToolTypes';
+import { GenericMcpClient } from '../aiphone/runtime/GenericMcpClient';
 import { ModelScopeClient } from './ModelScopeClient';
 import { ModelScopeConfig } from './ModelScopeConfig';
-import { ModelScopeMcpTool, StreamableMcpClient } from './StreamableMcpClient';
 
 const LOG_DOMAIN: number = 0x1200;
 const LOG_TAG: string = 'LoopModelScope';
@@ -12,12 +18,6 @@ const MAX_OBSERVATION_CHARS: number = 16000;
 const MAX_SEARCH_TOOLS: number = 24;
 const MAX_DESCRIPTION_TOOLS: number = 36;
 const MAX_TOOL_DESCRIPTION_CHARS: number = 220;
-
-const WRITE_PATTERNS: string[] = [
-  'send', 'create', 'update', 'delete', 'remove', 'post', 'publish',
-  'book', 'order', 'pay', 'purchase', 'cancel', 'refund', '上传', '发送',
-  '删除', '创建', '修改', '支付', '下单', '预订'
-];
 
 interface HttpResult {
   code: number;
@@ -60,11 +60,12 @@ interface DirectTool {
   qualifiedName: string;
   serverId: string;
   serverName: string;
-  endpoint: string;
   name: string;
   description: string;
   risk: string;
   inputSchema: Object;
+  mcpTool: DynamicMcpTool;
+  registration: DynamicToolRegistration;
 }
 
 interface SearchCandidate {
@@ -75,7 +76,7 @@ interface SearchCandidate {
   description: string;
   risk: string;
   inputSchema: Object;
-  useHint: string;
+  annotations?: McpToolAnnotations;
 }
 
 interface SearchObservation {
@@ -95,6 +96,27 @@ interface TruncatedObservation {
   source: string;
   truncated: boolean;
   preview: string;
+}
+
+export type ModelScopeExecutionDecision = 'allow' | 'unsearched' | 'missing' | 'unsafe';
+
+export function modelScopeExecutionDecision(
+  wasDiscovered: boolean,
+  tool: DynamicMcpTool | null
+): ModelScopeExecutionDecision {
+  if (!wasDiscovered) {
+    return 'unsearched';
+  }
+  if (tool === null) {
+    return 'missing';
+  }
+  const annotations = tool.annotations;
+  if (annotations === undefined ||
+    annotations.readOnlyHint !== true ||
+    annotations.destructiveHint === true) {
+    return 'unsafe';
+  }
+  return 'allow';
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -120,19 +142,9 @@ function safeSegment(value: string): string {
   return result.length > 0 ? result : 'tool';
 }
 
-function toolRisk(name: string, description: string): string {
-  const text = `${name} ${description}`.toLowerCase();
-  for (let index = 0; index < WRITE_PATTERNS.length; index++) {
-    if (text.indexOf(WRITE_PATTERNS[index]) >= 0) {
-      return 'write';
-    }
-  }
-  return 'read';
-}
-
 export class ModelScopeDirectClient implements ModelScopeClient {
   private config: ModelScopeConfig;
-  private mcp: StreamableMcpClient = new StreamableMcpClient();
+  private mcp: GenericMcpClient = new GenericMcpClient();
   private initialized: boolean = false;
   private syncError: string = '';
   private serverCount: number = 0;
@@ -161,19 +173,24 @@ export class ModelScopeDirectClient implements ModelScopeClient {
       for (let serverIndex = 0; serverIndex < servers.length; serverIndex++) {
         const server = servers[serverIndex];
         try {
-          const remoteTools = await this.mcp.listTools(server.endpoint);
-          for (let toolIndex = 0; toolIndex < remoteTools.length; toolIndex++) {
-            const tool = remoteTools[toolIndex];
+          const preflightRegistration = this.registrationFor(server, '');
+          const preflight = await this.mcp.preflight(preflightRegistration, '');
+          if (!preflight.ok) {
+            throw new Error(preflight.message.length > 0 ? preflight.message : `MCP HTTP ${preflight.httpStatus}`);
+          }
+          for (let toolIndex = 0; toolIndex < preflight.tools.length; toolIndex++) {
+            const tool = preflight.tools[toolIndex];
             const qualifiedName = this.qualifiedToolName(serverIndex, server.serverId, tool.name);
             loadedTools.push({
               qualifiedName: qualifiedName,
               serverId: server.serverId,
               serverName: server.name,
-              endpoint: server.endpoint,
               name: tool.name,
               description: tool.description,
-              risk: toolRisk(tool.name, tool.description),
-              inputSchema: tool.inputSchema
+              risk: modelScopeExecutionDecision(true, tool) === 'allow' ? 'read' : 'blocked',
+              inputSchema: tool.inputSchema,
+              mcpTool: tool,
+              registration: this.registrationFor(server, tool.name)
             });
           }
         } catch (error) {
@@ -198,13 +215,10 @@ export class ModelScopeDirectClient implements ModelScopeClient {
     const availability = this.syncError.length === 0
       ? `${this.serverCount} activated MCP servers and ${this.toolCount} tools are available via direct ModelScope.`
       : `${this.serverCount} servers are available via direct ModelScope with warning: ${this.syncError}.`;
-    return 'Use when the user request can be fulfilled by a ModelScope MCP tool. ' +
-      `${availability} Available tools loaded at app startup: ${this.catalogSummary()} ` +
-      'For Chinese flight/air ticket requests such as 航班/机票/飞机/飞常准, search ModelScope first and prefer 飞常准-Aviation flight tools. ' +
-      'For train/12306 requests, search ModelScope first and prefer 12306 tools. Two phases are mandatory. First output Action: modelscope[' +
-      '{"operation":"search","useCase":"the full user task"}]. Then choose a returned tool and output Action: modelscope[' +
-      '{"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{...}}]. ' +
-      'Never invent qualifiedName. Arguments must match inputSchema. Tools execute immediately in this internal direct demo.';
+    return 'Use only when the user request can be fulfilled by an activated ModelScope MCP tool. ' +
+      `${availability} Available tools: ${this.catalogSummary()} ` +
+      'Two phases are mandatory: search with the full use case, then execute one returned qualifiedName. ' +
+      'Never invent qualifiedName. Only risk=read tools execute; all other tools are blocked.';
   }
 
   async search(useCase: string): Promise<string> {
@@ -221,11 +235,22 @@ export class ModelScopeDirectClient implements ModelScopeClient {
         ? `ModelScope Direct 没有可用工具：${this.syncError}`
         : 'ModelScope Direct 没有在已激活 MCP 中找到可用工具。';
     }
+    this.discoveredTools.clear();
     const selected = this.rankTools(this.tools, query);
     const candidates: SearchCandidate[] = [];
+    const observation: SearchObservation = {
+      source: 'ModelScope',
+      mode: 'direct',
+      useCase: query,
+      tools: candidates,
+      instruction: 'Choose exactly one returned qualifiedName. Arguments must match inputSchema. Execute only tools whose risk is read. Output Action: modelscope({"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{}}).'
+    };
+    const emptyObservation = JSON.stringify(observation);
+    if (emptyObservation.length > MAX_OBSERVATION_CHARS) {
+      return this.limitObservation(emptyObservation);
+    }
     for (let index = 0; index < selected.length; index++) {
       const tool = selected[index].tool;
-      this.discoveredTools.add(tool.qualifiedName);
       candidates.push({
         qualifiedName: tool.qualifiedName,
         serverId: tool.serverId,
@@ -234,17 +259,18 @@ export class ModelScopeDirectClient implements ModelScopeClient {
         description: tool.description,
         risk: tool.risk,
         inputSchema: tool.inputSchema,
-        useHint: this.useHint(tool)
+        annotations: tool.mcpTool.annotations
       });
+      const candidateObservation = JSON.stringify(observation);
+      if (candidateObservation.length > MAX_OBSERVATION_CHARS) {
+        candidates.pop();
+        break;
+      }
     }
-    const observation: SearchObservation = {
-      source: 'ModelScope',
-      mode: 'direct',
-      useCase: query,
-      tools: candidates,
-      instruction: 'Choose exactly one returned qualifiedName. For flight route queries prefer searchFlightsByDepArr or searchFlightItineraries; use city IATA codes when schema asks for city codes, for example Shenzhen SZX and Xi’an/Xian XIY. Output Action: modelscope[{"operation":"execute","qualifiedName":"returned qualifiedName","arguments":{...}}]. Arguments must match inputSchema.'
-    };
-    return this.limitObservation(JSON.stringify(observation));
+    for (let index = 0; index < candidates.length; index++) {
+      this.discoveredTools.add(candidates[index].qualifiedName);
+    }
+    return JSON.stringify(observation);
   }
 
   async execute(qualifiedName: string, args: Object): Promise<string> {
@@ -252,20 +278,24 @@ export class ModelScopeDirectClient implements ModelScopeClient {
     if (normalized.length === 0) {
       return 'ModelScope 执行参数错误：qualifiedName 不能为空。';
     }
-    if (!this.discoveredTools.has(normalized)) {
-      return `ModelScope 拒绝执行：${normalized} 尚未通过当前会话的 search 发现。`;
-    }
     const tool = this.findTool(normalized);
-    if (tool === null) {
+    const selectedMcpTool = tool === null ? null : tool.mcpTool;
+    const decision = modelScopeExecutionDecision(this.discoveredTools.has(normalized), selectedMcpTool);
+    if (decision === 'unsearched') {
+      return `ModelScope 拒绝执行：${normalized} 尚未通过最近一次 search 发现。`;
+    }
+    if (decision === 'missing' || tool === null) {
       return `ModelScope 执行失败：${normalized} 不在当前同步工具列表中。`;
     }
+    if (decision === 'unsafe') {
+      return `UnsafeActionBlocked: ${normalized} 未明确标记为只读工具，当前版本拒绝执行。`;
+    }
     try {
-      const content = await this.mcp.callTool(tool.endpoint, tool.name, args);
-      const isError = (content as Record<string, Object | string | number | boolean | null | undefined>)['isError'] === true;
+      const content: DynamicGenericToolResult = await this.mcp.callTool(tool.registration, '', args);
       return this.limitObservation(JSON.stringify({
         source: 'ModelScope',
         mode: 'direct',
-        status: isError ? 'tool_error' : 'success',
+        status: content.status,
         qualifiedName: normalized,
         risk: tool.risk,
         content: content
@@ -348,6 +378,27 @@ export class ModelScopeDirectClient implements ModelScopeClient {
     }
   }
 
+  private registrationFor(server: DirectServer, mcpToolName: string): DynamicToolRegistration {
+    return {
+      toolId: `modelscope.${safeSegment(server.serverId)}.${safeSegment(mcpToolName)}`,
+      manifestId: `modelscope.${server.serverId}`,
+      displayName: server.name,
+      status: 'enabled',
+      transport: {
+        type: 'streamable_http',
+        url: server.endpoint,
+        command: '',
+        args: [],
+        headers: {},
+        env: {}
+      },
+      mcpToolName: mcpToolName,
+      credentialRef: '',
+      sourceUrl: server.endpoint,
+      lastError: ''
+    };
+  }
+
   private qualifiedToolName(serverIndex: number, serverId: string, toolName: string): string {
     const serverPart = safeSegment(serverId).substring(0, 20);
     const toolPart = safeSegment(toolName);
@@ -365,12 +416,12 @@ export class ModelScopeDirectClient implements ModelScopeClient {
 
   private rankTools(tools: DirectTool[], useCase: string): ScoredTool[] {
     const normalizedQuery = useCase.toLowerCase();
+    const words = normalizedQuery.split(/[\s,，。；;：:、]+/);
     const scored: ScoredTool[] = [];
     for (let index = 0; index < tools.length; index++) {
       const tool = tools[index];
-      const text = `${tool.name} ${tool.description} ${tool.serverId} ${tool.serverName}`.toLowerCase();
-      let score = this.domainBoost(tool, normalizedQuery, text);
-      const words = normalizedQuery.split(/[\s,，。；;：:、]+/);
+      const text = `${tool.name} ${tool.description} ${JSON.stringify(tool.inputSchema)}`.toLowerCase();
+      let score = 0;
       for (let wordIndex = 0; wordIndex < words.length; wordIndex++) {
         const word = words[wordIndex];
         if (word.length > 0 && text.indexOf(word) >= 0) {
@@ -388,37 +439,6 @@ export class ModelScopeDirectClient implements ModelScopeClient {
     }
     scored.sort((left: ScoredTool, right: ScoredTool): number => right.score - left.score);
     return scored.slice(0, MAX_SEARCH_TOOLS);
-  }
-
-  private domainBoost(tool: DirectTool, query: string, text: string): number {
-    let score = 0;
-    if (this.containsAny(query, ['航班', '机票', '飞机', '飞常准', '机场', '起飞', '落地', '直飞', '中转']) &&
-      this.containsAny(text, ['flight', 'variflight', 'aviation', '飞常准', 'airport'])) {
-      score += 100;
-      if (this.containsAny(tool.name.toLowerCase(), ['searchflightsbydeparr', 'searchflightitineraries', 'getflightpricebycities'])) {
-        score += 40;
-      }
-      if (this.containsAny(tool.name.toLowerCase(), ['number', 'happiness', 'weather', 'realtimelocation'])) {
-        score -= 25;
-      }
-    }
-    if (this.containsAny(query, ['火车', '高铁', '动车', '车票', '12306', '列车']) &&
-      this.containsAny(text, ['12306', 'train', 'ticket', '铁路', '火车', '车票'])) {
-      score += 100;
-    }
-    if (this.containsAny(query, ['天气', '气象']) && this.containsAny(text, ['weather', '天气'])) {
-      score += 60;
-    }
-    return score;
-  }
-
-  private containsAny(text: string, values: string[]): boolean {
-    for (let index = 0; index < values.length; index++) {
-      if (text.indexOf(values[index].toLowerCase()) >= 0) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private catalogSummary(): string {
@@ -444,27 +464,6 @@ export class ModelScopeDirectClient implements ModelScopeClient {
       parts.push(`...and ${this.tools.length - count} more`);
     }
     return parts.join(' | ');
-  }
-
-  private useHint(tool: DirectTool): string {
-    const name = tool.name.toLowerCase();
-    const serverText = `${tool.serverName} ${tool.serverId}`.toLowerCase();
-    if (serverText.indexOf('variflight') >= 0 || serverText.indexOf('飞常准') >= 0 || name.indexOf('flight') >= 0) {
-      if (name === 'searchflightsbydeparr') {
-        return '用于按出发地、到达地、日期查询直飞航班；深圳通常用 SZX，西安通常用 XIY。';
-      }
-      if (name === 'searchflightitineraries') {
-        return '用于给出自然语言航班行程推荐摘要。';
-      }
-      if (name === 'getflightpricebycities') {
-        return '用于查询城市间结构化航班价格列表。';
-      }
-      return '飞常准航班/机场相关工具。';
-    }
-    if (serverText.indexOf('12306') >= 0 || name.indexOf('train') >= 0) {
-      return '12306 火车票/列车查询相关工具。';
-    }
-    return '';
   }
 
   private errorMessage(error: Error | Object | string): string {
