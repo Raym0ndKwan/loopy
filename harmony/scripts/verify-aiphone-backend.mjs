@@ -130,6 +130,11 @@ function verifySourceContracts() {
   const registry = read('harmony/agent_core/src/main/ets/agent/ToolRegistry.ets');
   const demoEntry = read('harmony/entry/src/main/ets/pages/Index.ets');
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
+  const socialHubStart = runtimeGateway.indexOf('async function callLocalSocialHubTool');
+  const socialHubEnd = runtimeGateway.indexOf('async function callLocalXTool', socialHubStart);
+  const socialHubFunction = socialHubStart >= 0 && socialHubEnd > socialHubStart
+    ? runtimeGateway.slice(socialHubStart, socialHubEnd)
+    : '';
   const streamablePath = resolve(repoRoot, 'harmony/agent_core/src/main/ets/modelscope/StreamableMcpClient.ets');
   const legacySocialPaths = [
     'SocialBridge.ets',
@@ -202,7 +207,14 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
   assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
-  assertContains(runtimeGateway, "toolId === 'social.reply.draft'", 'runtime drafts SocialHub replies instead of sending');
+  assert(
+    socialHubFunction.includes("toolId === 'social.reply.draft'") &&
+      socialHubFunction.includes('socialHubClient.draft(') &&
+      socialHubFunction.includes('socialHubDraftA2ui(') &&
+      !socialHubFunction.includes('sendReply('),
+    'runtime drafts SocialHub replies instead of sending',
+    'missing scoped draft branch/call/render or found sendReply'
+  );
 
   assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
   assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
@@ -212,7 +224,7 @@ function verifySourceContracts() {
   assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
   assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
 
-  assertContains(index, 'LoopBackend', 'public export includes LoopBackend');
+  assertContains(index, 'export { LoopBackend,', 'public export includes LoopBackend');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
