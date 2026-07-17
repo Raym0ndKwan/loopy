@@ -68,6 +68,8 @@ interface XSearchPayload {
   includes?: XIncludesPayload;
 }
 
+const X_PUBLIC_SEARCH_MARKER: string = 'X 公开 post 搜索关键词:';
+
 interface XDmEventPayload {
   id?: string;
   event_type?: string;
@@ -80,6 +82,36 @@ interface XDmEventPayload {
 interface XDmEventsPayload {
   data?: Object[];
   includes?: XIncludesPayload;
+}
+
+interface InstagramUserPayload {
+  id?: string;
+  username?: string;
+}
+
+interface InstagramRecipientsPayload {
+  data?: Object[];
+}
+
+interface InstagramMessagePayload {
+  id?: string;
+  created_time?: string;
+  from?: InstagramUserPayload;
+  message?: string;
+  to?: InstagramRecipientsPayload;
+}
+
+interface InstagramMessagesPayload {
+  data?: Object[];
+}
+
+interface ComposioSocialErrorPayload {
+  message?: Object | string | number | boolean | null;
+}
+
+interface ComposioSocialEnvelope {
+  data?: Object | null;
+  error?: Object | string | number | boolean | null;
 }
 
 interface SlackChannelPayload {
@@ -172,11 +204,36 @@ function responseText(value: Object | string | number | boolean | ArrayBuffer): 
   return textOf(value);
 }
 
+function platformDisplayName(platform: SocialHubPlatform): string {
+  if (platform === 'x') {
+    return 'X';
+  }
+  if (platform === 'slack') {
+    return 'Slack';
+  }
+  if (platform === 'wecom') {
+    return '企业微信';
+  }
+  if (platform === 'discord') {
+    return 'Discord';
+  }
+  if (platform === 'linkedin') {
+    return 'LinkedIn';
+  }
+  if (platform === 'whatsapp') {
+    return 'WhatsApp';
+  }
+  if (platform === 'instagram') {
+    return 'Instagram';
+  }
+  return 'SocialHub';
+}
+
 function connection(platform: SocialHubPlatform, status: string, message: string): SocialHubConnectionData {
   return {
     platform: platform,
     status: status,
-    displayName: platform === 'x' ? 'X' : (platform === 'slack' ? 'Slack' : '企业微信'),
+    displayName: platformDisplayName(platform),
     accountId: '',
     message: message
   } as SocialHubConnectionData;
@@ -299,7 +356,14 @@ function xHandleFromPrompt(prompt: string): string {
   return '';
 }
 
-function xSearchQuery(prompt: string, xUsername: string): string {
+export function xSearchQuery(prompt: string, xUsername: string): string {
+  const markerIndex = prompt.indexOf(X_PUBLIC_SEARCH_MARKER);
+  if (markerIndex >= 0) {
+    const keyword = prompt.substring(markerIndex + X_PUBLIC_SEARCH_MARKER.length).trim();
+    if (keyword.length > 0) {
+      return keyword;
+    }
+  }
   if (/\b(?:from|to|@)[A-Za-z0-9_]/.test(prompt)) {
     return prompt.trim();
   }
@@ -598,6 +662,16 @@ function mergeFeedResults(results: SocialHubFeedResult[]): SocialHubFeedResult {
   };
 }
 
+export function socialHubPrivateItems(items: SocialHubItemData[]): SocialHubItemData[] {
+  const result: SocialHubItemData[] = [];
+  items.forEach((item: SocialHubItemData) => {
+    if (item.kind === 'message') {
+      result.push(item);
+    }
+  });
+  return result;
+}
+
 export function socialHubBridgeHeaders(gatewayApiKey: string): Record<string, string> {
   const headers: Record<string, string> = {
     'Accept': 'application/json'
@@ -624,6 +698,175 @@ export function parseSocialHubFeedPayload(raw: string): SocialHubFeedResult {
     });
   }
   return { items: items, connections: connections };
+}
+
+function composioSocialError(payload: ComposioSocialEnvelope): string {
+  if (payload.error === undefined || payload.error === null) {
+    return '';
+  }
+  if (typeof payload.error === 'object') {
+    const error = payload.error as ComposioSocialErrorPayload;
+    const message = textOf(error.message).trim();
+    return message.length > 0 ? message : textOf(payload.error);
+  }
+  return textOf(payload.error);
+}
+
+function xUserForId(includes: XIncludesPayload | undefined, id: string): XUserPayload {
+  if (includes !== undefined && Array.isArray(includes.users)) {
+    for (let index = 0; index < includes.users.length; index++) {
+      const user = includes.users[index] as XUserPayload;
+      if (textOf(user.id) === id) {
+        return user;
+      }
+    }
+  }
+  return {};
+}
+
+function slackTimestamp(value: string): string {
+  const seconds = Number(value.split('.')[0]);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return '';
+  }
+  return new Date(seconds * 1000).toISOString();
+}
+
+function parseComposioXMessages(data: Object, ownAccountId: string): SocialHubItemData[] {
+  const payload = data as XDmEventsPayload;
+  const items: SocialHubItemData[] = [];
+  if (!Array.isArray(payload.data)) {
+    return items;
+  }
+  payload.data.forEach((value: Object) => {
+    const event = value as XDmEventPayload;
+    const senderId = textOf(event.sender_id);
+    if (textOf(event.event_type) !== 'MessageCreate' || textOf(event.text).trim().length === 0 ||
+      (ownAccountId.length > 0 && senderId === ownAccountId)) {
+      return;
+    }
+    const user = xUserForId(payload.includes, senderId);
+    const username = textOf(user.username);
+    items.push({
+      id: textOf(event.id),
+      platform: 'x',
+      kind: 'message',
+      author: textOf(user.name).trim().length > 0 ? textOf(user.name) : (username.length > 0 ? username : senderId),
+      handle: username.length > 0 ? '@' + username : senderId,
+      text: textOf(event.text),
+      timestamp: textOf(event.created_at),
+      url: '',
+      mediaUrl: '',
+      channel: '私信',
+      channelId: textOf(event.dm_conversation_id),
+      threadId: textOf(event.dm_conversation_id),
+      unread: false
+    } as SocialHubItemData);
+  });
+  return items;
+}
+
+function parseComposioSlackMessages(data: Object): SocialHubItemData[] {
+  const payload = data as SlackSearchPayload;
+  const items: SocialHubItemData[] = [];
+  if (payload.messages === undefined || !Array.isArray(payload.messages.matches)) {
+    return items;
+  }
+  payload.messages.matches.forEach((value: Object) => {
+    const match = value as SlackMatchPayload;
+    const channel = match.channel ?? {};
+    const channelId = textOf(channel.id);
+    const permalink = textOf(match.permalink);
+    if (textOf(match.text).trim().length === 0 ||
+      (channelId.indexOf('D') !== 0 && permalink.toLowerCase().indexOf('/archives/d') < 0)) {
+      return;
+    }
+    const username = textOf(match.username).trim().length > 0 ? textOf(match.username) :
+      (textOf(match.user_name).trim().length > 0 ? textOf(match.user_name) : textOf(match.user));
+    items.push({
+      id: textOf(match.iid).trim().length > 0 ? textOf(match.iid) : textOf(match.ts),
+      platform: 'slack',
+      kind: 'message',
+      author: username.length > 0 ? username : textOf(channel.name),
+      handle: '',
+      text: textOf(match.text),
+      timestamp: slackTimestamp(textOf(match.ts)),
+      url: permalink,
+      mediaUrl: '',
+      channel: textOf(channel.name).trim().length > 0 ? textOf(channel.name) : '私信',
+      channelId: channelId,
+      threadId: textOf(match.thread_ts).trim().length > 0 ? textOf(match.thread_ts) : textOf(match.ts),
+      unread: false
+    } as SocialHubItemData);
+  });
+  return items;
+}
+
+function parseComposioInstagramMessages(data: Object, conversationId: string, ownAccountId: string): SocialHubItemData[] {
+  const payload = data as InstagramMessagesPayload;
+  const items: SocialHubItemData[] = [];
+  if (!Array.isArray(payload.data)) {
+    return items;
+  }
+  payload.data.forEach((value: Object) => {
+    const message = value as InstagramMessagePayload;
+    const sender = message.from ?? {};
+    const senderId = textOf(sender.id);
+    if (textOf(message.message).trim().length === 0 ||
+      (ownAccountId.length > 0 && senderId === ownAccountId)) {
+      return;
+    }
+    const username = textOf(sender.username);
+    items.push({
+      id: textOf(message.id),
+      platform: 'instagram',
+      kind: 'message',
+      author: username.length > 0 ? username : senderId,
+      handle: username.length > 0 ? '@' + username : senderId,
+      text: textOf(message.message),
+      timestamp: textOf(message.created_time),
+      url: '',
+      mediaUrl: '',
+      channel: '私信',
+      channelId: conversationId,
+      threadId: conversationId,
+      unread: false
+    } as SocialHubItemData);
+  });
+  return items;
+}
+
+export function parseComposioSocialFeed(
+  platform: SocialHubPlatform,
+  raw: string,
+  conversationId: string = '',
+  ownAccountId: string = ''
+): SocialHubFeedResult {
+  let payload: ComposioSocialEnvelope;
+  try {
+    payload = JSON.parse(raw) as ComposioSocialEnvelope;
+  } catch (_error) {
+    return { items: [], connections: [connection(platform, 'error', 'Provider 返回了无法解析的数据。')] };
+  }
+  const error = composioSocialError(payload);
+  if (error.length > 0) {
+    return { items: [], connections: [connection(platform, 'error', error)] };
+  }
+  const data = payload.data;
+  let items: SocialHubItemData[] = [];
+  if (data !== undefined && data !== null) {
+    if (platform === 'x') {
+      items = parseComposioXMessages(data, ownAccountId);
+    } else if (platform === 'slack') {
+      items = parseComposioSlackMessages(data);
+    } else if (platform === 'instagram') {
+      items = parseComposioInstagramMessages(data, conversationId, ownAccountId);
+    }
+  }
+  return {
+    items: items,
+    connections: [connection(platform, 'connected', platformDisplayName(platform) + ' 已连接')]
+  };
 }
 
 export function parseSocialHubDraftPayload(raw: string): SocialHubDraftData {
@@ -711,7 +954,7 @@ export class SocialHubClient {
   async feed(query: string, _gatewayApiKey: string = '', providerConfig: SocialHubProviderConfig = emptySocialHubProviderConfig()): Promise<SocialHubFeedResult> {
     const results: SocialHubFeedResult[] = [];
     try {
-      results.push(await fetchXRecentSearch(query, providerConfig));
+      results.push(await fetchXDirectMessages(query, providerConfig));
     } catch (error) {
       results.push({ items: [], connections: [connectionError('x', describeThrown(error))] });
     }

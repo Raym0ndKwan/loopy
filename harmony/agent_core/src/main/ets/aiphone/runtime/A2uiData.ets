@@ -27,6 +27,7 @@ import {
   SocialHubDraftData,
   SocialHubItemData
 } from './SocialHubTypes';
+import { AggregateSearchResult, emptyAggregateSearchResult } from './AggregateSearchTypes';
 
 export type A2uiLabelValue = A2uiLabelValueData;
 export type A2uiTrainOption = A2uiTrainData;
@@ -62,6 +63,7 @@ interface LooseGenericToolResultData {
   summary?: Object | string | number | boolean | null;
   rows?: Object[];
   rawPreview?: Object | string | number | boolean | null;
+  actions?: A2uiAction[];
 }
 
 function emptyModel(): A2uiRuntimeDataModel {
@@ -90,6 +92,7 @@ function emptyModel(): A2uiRuntimeDataModel {
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
     genericToolResults: [],
+    aggregateSearch: emptyAggregateSearchResult(),
     socialHub: emptySocialHub(),
     persona: emptyPersona(),
     personaMemory: emptyPersonaMemory(),
@@ -209,7 +212,7 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       continue;
     }
     const result = source as LooseGenericToolResultData;
-    normalized.push({
+    const normalizedResult: A2uiGenericToolResultData = {
       sourceTag: textOf(result.sourceTag),
       toolName: textOf(result.toolName),
       title: textOf(result.title),
@@ -217,7 +220,11 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       summary: textOf(result.summary),
       rows: normalizeGenericToolResultRows(result.rows),
       rawPreview: textOf(result.rawPreview)
-    });
+    };
+    if (Array.isArray(result.actions)) {
+      normalizedResult.actions = result.actions;
+    }
+    normalized.push(normalizedResult);
   }
   return normalized;
 }
@@ -333,6 +340,7 @@ function parseModel(surface: A2uiSurfaceState): A2uiRuntimeDataModel {
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
+      aggregateSearch: parsed.aggregateSearch === undefined || parsed.aggregateSearch === null ? fallback.aggregateSearch : parsed.aggregateSearch,
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
@@ -482,6 +490,9 @@ export function resolveData(surface: A2uiSurfaceState, path: string | undefined)
   }
   if (path === '/genericToolResults') {
     return model.genericToolResults;
+  }
+  if (path === '/aggregateSearch') {
+    return model.aggregateSearch === undefined ? emptyAggregateSearchResult() : model.aggregateSearch;
   }
   if (path === '/stripeReceivingAccount') {
     return model.stripeReceivingAccount === undefined ? emptyStripeReceivingAccount() : model.stripeReceivingAccount;

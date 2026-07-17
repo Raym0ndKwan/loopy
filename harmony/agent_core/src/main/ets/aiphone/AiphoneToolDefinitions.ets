@@ -95,6 +95,42 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: []
   },
   {
+    toolId: 'luckin.order.preview',
+    domain: 'luckin',
+    intent: 'luckin.order.preview',
+    riskLevel: 'draft',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderPreviewRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.create']
+  },
+  {
+    toolId: 'luckin.order.create',
+    domain: 'luckin',
+    intent: 'luckin.order.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['luckin.order.status']
+  },
+  {
+    toolId: 'luckin.order.status',
+    domain: 'luckin',
+    intent: 'luckin.order.status',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key'],
+    inputSchema: 'luckinOrderStatusQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
+  },
+  {
     toolId: 'social.feed.search',
     domain: 'social',
     intent: 'social.feed.search',
@@ -126,9 +162,9 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     backendPriority: ['local_adapter'],
     authModes: ['oauth', 'provider_key'],
     inputSchema: 'xPostSearchQuery',
-    outputSchema: 'socialHubFeed',
-    a2uiComponent: 'SocialHub',
-    actions: ['social.reply.draft']
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: []
   },
   {
     toolId: 'mail.search',
@@ -263,6 +299,30 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['media.open.web']
   },
   {
+    toolId: 'media.aggregate.search',
+    domain: 'media',
+    intent: 'media.aggregate.search',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'oauth', 'mcp_auth'],
+    inputSchema: 'aggregateMediaSearchQuery',
+    outputSchema: 'aggregateSearch',
+    a2uiComponent: 'AggregateSearch',
+    actions: ['media.open.web']
+  },
+  {
+    toolId: 'worldcup.open',
+    domain: 'media',
+    intent: 'worldcup.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['system'],
+    inputSchema: 'worldCupExperienceRequest',
+    outputSchema: 'worldCupExperience',
+    a2uiComponent: 'AnythingDemo',
+    actions: []
+  },
+  {
     toolId: 'youtube.mine.playlists',
     domain: 'youtube',
     intent: 'youtube.mine.playlists',
@@ -323,6 +383,18 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     actions: ['calendar.authorize']
   },
   {
+    toolId: 'calendar.event.delete',
+    domain: 'calendar',
+    intent: 'calendar.event.delete',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['mcp_auth'],
+    inputSchema: 'eventId?:string,query?:string,timeMin?:string,timeMax?:string,timezone?:string,calendarId?:string,title?:string,start?:string,end?:string,confirmed?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['calendar.event.delete.confirm']
+  },
+  {
     toolId: 'payment.send',
     domain: 'payment',
     intent: 'payment.send',
@@ -369,6 +441,90 @@ const TOOL_DEFINITIONS: ToolDefinition[] = [
     outputSchema: 'place',
     a2uiComponent: 'GenericToolResults',
     actions: []
+  },
+  {
+    toolId: 'maps.route.open',
+    domain: 'maps',
+    intent: 'maps.route.open',
+    riskLevel: 'read',
+    backendPriority: ['system_intent'],
+    authModes: ['none'],
+    inputSchema: 'origin:string,destination:string,travelMode?:driving|walking|bicycling|transit|two-wheeler,navigate?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['maps.open.web']
+  },
+  {
+    toolId: 'whatsapp.message.send',
+    domain: 'whatsapp',
+    intent: 'whatsapp.message.send',
+    riskLevel: 'confirm_required',
+    backendPriority: ['oauth_api'],
+    authModes: ['mcp_auth'],
+    inputSchema: 'toNumber:string,text:string,phoneNumberId?:string,wabaId?:string,previewUrl?:boolean,confirmed?:boolean',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['whatsapp.message.send.confirm']
+  },
+  {
+    toolId: 'ride.estimate',
+    domain: 'ride',
+    intent: 'ride.estimate',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideRouteQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.order.confirm', 'ride.open.didi', 'ride.open.amap']
+  },
+  {
+    toolId: 'ride.app.link',
+    domain: 'ride',
+    intent: 'ride.app.link',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideRouteQuery',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.open.didi', 'ride.open.amap']
+  },
+  {
+    toolId: 'ride.order.create',
+    domain: 'ride',
+    intent: 'ride.order.create',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideOrderCreateRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.driver.location.refresh', 'ride.order.cancel']
+  },
+  {
+    toolId: 'ride.order.cancel',
+    domain: 'ride',
+    intent: 'ride.order.cancel',
+    riskLevel: 'confirm_required',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideOrderCancelRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.query.retry', 'ride.vehicle.change']
+  },
+  {
+    toolId: 'ride.driver.location',
+    domain: 'ride',
+    intent: 'ride.driver.location',
+    riskLevel: 'read',
+    backendPriority: ['local_adapter'],
+    authModes: ['provider_key', 'mcp_auth'],
+    inputSchema: 'rideDriverLocationRequest',
+    outputSchema: 'genericToolResults',
+    a2uiComponent: 'GenericToolResults',
+    actions: ['ride.driver.location.refresh', 'ride.order.cancel']
   }
 ];
 

@@ -2,6 +2,7 @@ import {
   A2UI_COMPONENT_ERROR_NOTICE,
   A2UI_COMPONENT_SURFACE_ROOT,
   A2uiApplyResult,
+  A2uiAction,
   A2uiComponent,
   A2uiDataValue,
   A2uiDynamicToolConnectData,
@@ -34,6 +35,7 @@ import {
   SocialHubConnectionData,
   SocialHubItemData
 } from './SocialHubTypes';
+import { AggregateSearchResult, emptyAggregateSearchResult } from './AggregateSearchTypes';
 
 function cloneComponents(values: A2uiComponent[]): A2uiComponent[] {
   const next: A2uiComponent[] = [];
@@ -105,6 +107,7 @@ function emptyDataModel(): A2uiRuntimeDataModel {
     },
     dynamicToolConnect: emptyDynamicToolConnect(),
     genericToolResults: [],
+    aggregateSearch: emptyAggregateSearchResult(),
     socialHub: emptySocialHub(),
     persona: emptyPersona(),
     personaMemory: emptyPersonaMemory(),
@@ -206,6 +209,7 @@ interface LooseGenericToolResultData {
   summary?: Object | string | number | boolean | null;
   rows?: Object[];
   rawPreview?: Object | string | number | boolean | null;
+  actions?: A2uiAction[];
 }
 
 function textOf(value: Object | string | number | boolean | null | undefined): string {
@@ -395,7 +399,7 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       continue;
     }
     const result = source as LooseGenericToolResultData;
-    normalized.push({
+    const normalizedResult: A2uiGenericToolResultData = {
       sourceTag: textOf(result.sourceTag),
       toolName: textOf(result.toolName),
       title: textOf(result.title),
@@ -403,7 +407,11 @@ function normalizeGenericToolResults(parsed: A2uiRuntimeDataModel, fallback: A2u
       summary: textOf(result.summary),
       rows: normalizeGenericToolResultRows(result.rows),
       rawPreview: textOf(result.rawPreview)
-    });
+    };
+    if (Array.isArray(result.actions)) {
+      normalizedResult.actions = result.actions;
+    }
+    normalized.push(normalizedResult);
   }
   return normalized;
 }
@@ -483,6 +491,7 @@ function parseDataModel(json: string): A2uiRuntimeDataModel {
       toolRequest: normalizeToolRequest(parsed, fallback.toolRequest),
       dynamicToolConnect: normalizeDynamicToolConnect(parsed, fallback.dynamicToolConnect),
       genericToolResults: normalizeGenericToolResults(parsed, fallback.genericToolResults),
+      aggregateSearch: parsed.aggregateSearch === undefined || parsed.aggregateSearch === null ? fallback.aggregateSearch : parsed.aggregateSearch,
       socialHub: normalizeSocialHub(parsed.socialHub, fallback.socialHub),
       persona: normalizePersona(parsed, fallback.persona),
       personaMemory: normalizePersonaMemory(parsed, fallback.personaMemory),
@@ -609,6 +618,8 @@ function setKnownDataPath(model: A2uiRuntimeDataModel, path: string, value: A2ui
     next.dynamicToolConnect = value as A2uiDynamicToolConnectData;
   } else if (path === '/genericToolResults') {
     next.genericToolResults = value as A2uiGenericToolResultData[];
+  } else if (path === '/aggregateSearch') {
+    next.aggregateSearch = value as AggregateSearchResult;
   } else if (path === '/persona') {
     next.persona = value as A2uiPersonaData;
   } else if (path === '/personaMemory') {

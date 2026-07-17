@@ -9,6 +9,7 @@ import {
   A2uiSummaryData
 } from './A2uiTypes';
 import { DynamicGenericToolResult } from './DynamicToolTypes';
+import { gmailComposioThreadResults } from './GmailToolA2ui';
 import { MailProviderStatus, MailThreadResult } from './MailToolTypes';
 
 const GENERIC_RESULTS_PATH: string = '/genericToolResults';
@@ -146,10 +147,14 @@ function threadResult(thread: MailThreadResult): A2uiGenericToolResultData {
 }
 
 function statusResult(status: MailProviderStatus): A2uiGenericToolResultData {
+  let title = status.title;
+  if (status.status !== 'success' && status.provider === 'gmail' && title.indexOf('Composio') >= 0) {
+    title = 'Gmail 调用失败';
+  }
   return {
     sourceTag: providerLabel(status.provider),
     toolName: 'mail.provider.status',
-    title: status.title,
+    title: title,
     status: status.status,
     summary: status.message,
     rows: [
@@ -161,12 +166,55 @@ function statusResult(status: MailProviderStatus): A2uiGenericToolResultData {
   };
 }
 
-export function mailResultsA2ui(surfaceId: string, toolId: string, threads: MailThreadResult[], statuses: MailProviderStatus[]): string {
+function dynamicResult(result: DynamicGenericToolResult): A2uiGenericToolResultData {
+  return {
+    sourceTag: result.sourceTag,
+    toolName: result.toolName,
+    title: result.title,
+    status: result.status,
+    summary: result.summary,
+    rows: result.rows,
+    rawPreview: result.rawPreview
+  };
+}
+
+function dynamicResults(result: DynamicGenericToolResult): A2uiGenericToolResultData[] {
+  const gmailRows = gmailComposioThreadResults(result);
+  if (gmailRows.length > 0) {
+    return gmailRows;
+  }
+  return [dynamicResult(result)];
+}
+
+function isTechnicalGmailSearchSummary(result: A2uiGenericToolResultData): boolean {
+  const source = result.sourceTag.toLowerCase();
+  if (source.indexOf('gmail') < 0 || result.toolName === 'mail.thread') {
+    return false;
+  }
+  return result.title.trim() === 'Gmail 搜索条件' ||
+    (result.toolName === 'users.threads.list' && result.rawPreview.indexOf(' returned=') >= 0);
+}
+
+export function mailResultsA2ui(
+  surfaceId: string,
+  toolId: string,
+  threads: MailThreadResult[],
+  statuses: MailProviderStatus[],
+  extras: DynamicGenericToolResult[] = []
+): string {
   const sorted = threads.slice().sort((left: MailThreadResult, right: MailThreadResult) => dateMs(right.receivedAt) - dateMs(left.receivedAt));
   const results: A2uiGenericToolResultData[] = [];
-  statuses.forEach((status: MailProviderStatus) => results.push(statusResult(status)));
+  statuses.forEach((status: MailProviderStatus) => {
+    if (status.status !== 'success') {
+      results.push(statusResult(status));
+    }
+  });
   sorted.forEach((thread: MailThreadResult) => results.push(threadResult(thread)));
-  const count = results.length;
+  extras.forEach((result: DynamicGenericToolResult) => {
+    dynamicResults(result).forEach((item: A2uiGenericToolResultData) => results.push(item));
+  });
+  const visibleResults = results.filter((result: A2uiGenericToolResultData) => !isTechnicalGmailSearchSummary(result));
+  const count = visibleResults.length;
   const title = '邮箱';
   const summary: A2uiSummaryData = {
     text: count.toString() + (count === 1 ? ' mail result returned for review.' : ' mail results returned for review.'),
@@ -176,7 +224,7 @@ export function mailResultsA2ui(surfaceId: string, toolId: string, threads: Mail
   };
   return createSurfaceLine(surfaceId, title, 'ready') +
     componentsLine(surfaceId, title, 'ready') +
-    dataLine(surfaceId, GENERIC_RESULTS_PATH, results) +
+    dataLine(surfaceId, GENERIC_RESULTS_PATH, visibleResults) +
     dataLine(surfaceId, SUMMARY_PATH, summary);
 }
 
@@ -188,15 +236,7 @@ export function mailResultsFromDynamicA2ui(
 ): string {
   const mapped: A2uiGenericToolResultData[] = [];
   results.forEach((result: DynamicGenericToolResult) => {
-    mapped.push({
-      sourceTag: result.sourceTag,
-      toolName: result.toolName,
-      title: result.title,
-      status: result.status,
-      summary: result.summary,
-      rows: result.rows,
-      rawPreview: ''
-    });
+    dynamicResults(result).forEach((item: A2uiGenericToolResultData) => mapped.push(item));
   });
   const summary: A2uiSummaryData = {
     text: mapped.length.toString() + ' mail results returned for review.',
@@ -243,7 +283,7 @@ export function mailReplyDraftAction(result: A2uiGenericToolResultData): A2uiAct
   return {
     id: 'mail.ai.reply.draft',
     label: 'AI 回复草稿',
-    prompt: 'Action ID: mail.ai.reply.draft。请基于真实邮件生成一封简短、礼貌、可审核的回复草稿。只选择 mail.draft.create，不要发送，不要编造事实。/toolRequest.args 必须保留 provider、messageId、threadId、to、subject、replyMode，并由你撰写 args.body。Structured action args JSON: ' + JSON.stringify(args),
+    prompt: 'Action ID: mail.ai.reply.draft。请只基于 args.contextSummary 中的真实邮件标题与正文生成一封简短、礼貌、可审核的回复草稿。只选择 mail.draft.create，不要发送，不要编造事实。/toolRequest.args 必须保留 provider、messageId、threadId、to、subject、replyMode，并由你撰写 args.body。Structured action args JSON: ' + JSON.stringify(args),
     variant: 'primary',
     kind: 'prompt',
     args: args

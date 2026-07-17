@@ -90,6 +90,33 @@ the scoped project `apiKey` plus the stable connected-account `userId`. The loca
 by Git. Discovered tools execute immediately, including tools with side effects; production apps
 should proxy Composio through their own backend.
 
+## ModelScope MCP
+
+The regular Loop chat registers a `modelscope` meta tool. For the current demo it connects directly
+to ModelScope from the phone, without a local Gateway.
+
+Copy `entry/src/main/resources/rawfile/modelscope_config.example.json` to
+`entry/src/main/resources/rawfile/modelscope_config.json` and configure (the local file is
+ignored by Git):
+
+```json
+{
+  "mode": "direct",
+  "modelscopeApiBaseUrl": "https://modelscope.cn",
+  "modelscopeToken": "your ModelScope token"
+}
+```
+
+The phone calls ModelScope's operational MCP API, lists only the account's activated Hosted MCP
+tools, and reuses the shared `GenericMcpClient` for Streamable HTTP `tools/list` and `tools/call`.
+Search and execute are separate phases: execute accepts only a `qualifiedName` returned by the most
+recent search. The demo executes only tools whose MCP annotations explicitly declare
+`readOnlyHint: true` and do not declare `destructiveHint: true`; unannotated, write, and destructive
+tools are blocked until a real confirmation flow exists.
+
+The token is still packaged into the app rawfile, so this direct mode is for internal demos only.
+Do not commit `modelscope_config.json` or ship this credential layout as a production architecture.
+
 ## Source layout
 
 ```text
@@ -129,7 +156,7 @@ import { ReActAgentRunner, ToolRegistry, createLoopModel } from '@loop/agent-cor
 
 ## Conversation memory
 
-Loop keeps a simple in-session history of user messages and final assistant answers in `ConversationContext`. Each successful run appends one user/assistant pair; failed runs are not stored. Use **Clear** to reset the session.
+Loop keeps a history of user messages and final assistant answers in `ConversationContext`. Each successful run appends one user/assistant pair; failed runs are not stored. History is persisted to device preferences via `ConversationStore` and restored on launch (last 50 turns). Use **Clear** to reset the session and wipe stored history.
 
 ## AGenUI (generative UI)
 
