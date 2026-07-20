@@ -8,9 +8,29 @@ import {
   MESSAGE_TYPE_TASK_RESULT_UI
 } from './AgentMessageTypes';
 import { AgentMessage } from './MessageBus';
-import { MessageDrivenAgent } from './MessageDrivenAgent';
+import { MessageBus } from './MessageBus';
+import { MessageDrivenAgent, MessageProcessingMode } from './MessageDrivenAgent';
+import { LEADER_AGENT_IDENTITY_PROMPT } from './LeaderAgentPrompt';
+import { createLeaderToolRegistry } from './LeaderToolRegistry';
+import { LocalModel } from '../model/LocalModel';
 
 export class LeaderAgent extends MessageDrivenAgent {
+  constructor(
+    model: LocalModel,
+    maxSteps: number,
+    bus: MessageBus
+  ) {
+    super(
+      'Leader',
+      LEADER_AGENT_IDENTITY_PROMPT,
+      model,
+      maxSteps,
+      bus,
+      MessageProcessingMode.BATCH_PENDING,
+      createLeaderToolRegistry(bus)
+    );
+  }
+
   protected handle(message: AgentMessage): void {
     if (message.type === MESSAGE_TYPE_CONTROL_CLEAR) {
       this.clearContext();
