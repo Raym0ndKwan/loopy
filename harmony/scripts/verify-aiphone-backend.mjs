@@ -146,6 +146,9 @@ function verifySourceContracts() {
   );
   const registry = read('harmony/agent_core/src/main/ets/agent/ToolRegistry.ets');
   const reactAgent = read('harmony/agent_core/src/main/ets/agent/ReActAgent.ets');
+  const reactRunner = read('harmony/agent_core/src/main/ets/agent/ReActAgentRunner.ets');
+  const leaderAgent = read('harmony/agent_core/src/main/ets/agent/LeaderAgent.ets');
+  const uiMakerAgent = read('harmony/agent_core/src/main/ets/agent/UIMakerAgent.ets');
   const leaderRegistry = read('harmony/agent_core/src/main/ets/agent/LeaderToolRegistry.ets');
   const uiMakerRegistry = read('harmony/agent_core/src/main/ets/agent/UIMakerToolRegistry.ets');
   const demoEntry = read('harmony/entry/src/main/ets/pages/Index.ets');
@@ -302,16 +305,24 @@ function verifySourceContracts() {
   assertContains(registry, 'this.ensureMutable()', 'sealed tool registries reject later mutation');
   assertContains(reactAgent, 'tools: ToolRegistry,', 'ReAct agent requires an explicit tool registry');
   assertContains(reactAgent, 'tools.seal()', 'ReAct agent seals capabilities during construction');
+  assertContains(reactAgent, 'new ReActAgentRunner(model, tools, maxSteps, uiHandler)', 'ReAct agent delegates loop execution to the shared runner');
+  assertContains(reactAgent, 'private conversation: ConversationContext', 'ReAct agent owns exactly one conversation context');
+  assertContains(reactAgent, 'protected async executeTask', 'ReAct execution is protected from direct UI invocation');
+  assertContains(reactRunner, 'options?: ReActRunOptions', 'shared runner accepts an optional role identity');
+  assertContains(reactRunner, 'this.buildSystemPrompt(options)', 'shared runner owns the common ReAct output contract');
   assertContains(leaderRegistry, 'registry.register(new CreateUiTaskTool(bus))', 'Leader registry explicitly injects UI task creation');
   assertContains(leaderRegistry, 'registry.register(new TimeTool())', 'Leader registry explicitly injects time');
   assertContains(uiMakerRegistry, 'registry.register(new TimeTool())', 'UImaker registry explicitly injects time');
   assertContains(uiMakerRegistry, 'registry.register(new UiTool())', 'UImaker registry explicitly injects UI rendering');
   assertContains(demoEntry, 'new LinkedMessageBus()', 'Loopy entry owns the shared message bus');
   assertContains(demoEntry, 'new ChatInteractor(this.bus)', 'user interaction is routed through the bus');
-  assertContains(demoEntry, 'createLeaderToolRegistry(this.bus)', 'Loopy entry constructs the Leader registry explicitly');
-  assertContains(demoEntry, 'createUIMakerToolRegistry()', 'Loopy entry constructs the UImaker registry explicitly');
-  assertContains(demoEntry, 'MessageProcessingMode.BATCH_PENDING', 'Leader batches pending bus messages');
-  assertContains(demoEntry, 'MessageProcessingMode.ONE_BY_ONE', 'UImaker processes UI tasks one by one');
+  assertContains(leaderAgent, 'createLeaderToolRegistry(bus)', 'Leader fixes its own capability registry');
+  assertContains(uiMakerAgent, 'createUIMakerToolRegistry()', 'UImaker fixes its own capability registry');
+  assertContains(leaderAgent, 'MessageProcessingMode.BATCH_PENDING', 'Leader fixes batch processing as a role invariant');
+  assertContains(uiMakerAgent, 'MessageProcessingMode.ONE_BY_ONE', 'UImaker fixes one-by-one processing as a role invariant');
+  assert(!demoEntry.includes('createLeaderToolRegistry'), 'Loopy entry cannot choose Leader capabilities');
+  assert(!demoEntry.includes('createUIMakerToolRegistry'), 'Loopy entry cannot choose UImaker capabilities');
+  assert(!demoEntry.includes('MessageProcessingMode'), 'Loopy entry cannot choose role scheduling policies');
   assertContains(demoEntry, 'this.interactor.send(task)', 'user input is written through the bus interactor');
   assert(!demoEntry.includes('createConfiguredLoopToolRegistry'), 'role agents do not receive the legacy all-capability registry');
 }

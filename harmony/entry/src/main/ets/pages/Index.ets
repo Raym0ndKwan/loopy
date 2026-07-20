@@ -4,22 +4,17 @@ import {
   A2uiComponentDef,
   AgentEventKind,
   AgentMessage,
-  createLeaderToolRegistry,
   createA2uiModelInfo,
   createLoopModelInfo,
-  createUIMakerToolRegistry,
   LeaderAgent,
-  LEADER_AGENT_IDENTITY_PROMPT,
   LinkedMessageBus,
   MESSAGE_TAG_UI_MAKER,
   MESSAGE_TYPE_CONTROL_CLEAR,
   MESSAGE_TYPE_OTHERS,
   MessageBus,
-  MessageProcessingMode,
   parseJsonl,
   ScriptedA2uiModel,
   UIMakerAgent,
-  UI_MAKER_AGENT_IDENTITY_PROMPT,
   UiRenderHandler
 } from '@loop/agent-core';
 import { A2uiFallbackView } from '../agenui/A2uiFallbackView';
@@ -28,7 +23,7 @@ import { componentsFromUiEvent } from '../agenui/LoopUiApplier';
 import { ChatInteractor } from '../interactor/ChatInteractor';
 
 const MAX_STEPS = 6;
-const WELCOME_TRANSCRIPT = 'Muti-Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+const WELCOME_TRANSCRIPT = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
 
 class AgentRuntime {
   readonly leader: LeaderAgent;
@@ -202,22 +197,14 @@ struct Index {
     this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
     const uiHandler = await this.buildUiHandler();
     const leader = new LeaderAgent(
-      'Leader',
-      LEADER_AGENT_IDENTITY_PROMPT,
       modelInfo.model,
       MAX_STEPS,
-      this.bus,
-      MessageProcessingMode.BATCH_PENDING,
-      createLeaderToolRegistry(this.bus)
+      this.bus
     );
     const uiMaker = new UIMakerAgent(
-      'UImaker',
-      UI_MAKER_AGENT_IDENTITY_PROMPT,
       modelInfo.model,
       MAX_STEPS,
       this.bus,
-      MessageProcessingMode.ONE_BY_ONE,
-      createUIMakerToolRegistry(),
       uiHandler
     );
     uiMaker.startListening();

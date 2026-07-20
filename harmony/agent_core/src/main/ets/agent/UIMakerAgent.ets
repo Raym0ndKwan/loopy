@@ -6,10 +6,37 @@ import {
   MESSAGE_TYPE_TASK_RESULT_UI
 } from './AgentMessageTypes';
 import { AgentEvent, AgentEventKind } from './AgentEvent';
-import { AgentMessage } from './MessageBus';
-import { AgentRunOutcome, AgentRunOutcomeKind, MessageDrivenAgent } from './MessageDrivenAgent';
+import { AgentMessage, MessageBus } from './MessageBus';
+import {
+  AgentRunOutcome,
+  AgentRunOutcomeKind,
+  MessageDrivenAgent,
+  MessageProcessingMode
+} from './MessageDrivenAgent';
+import { UiRenderHandler } from './ReActAgentRunner';
+import { UI_MAKER_AGENT_IDENTITY_PROMPT } from './UIMakerAgentPrompt';
+import { createUIMakerToolRegistry } from './UIMakerToolRegistry';
+import { LocalModel } from '../model/LocalModel';
 
 export class UIMakerAgent extends MessageDrivenAgent {
+  constructor(
+    model: LocalModel,
+    maxSteps: number,
+    bus: MessageBus,
+    uiHandler: UiRenderHandler
+  ) {
+    super(
+      'UImaker',
+      UI_MAKER_AGENT_IDENTITY_PROMPT,
+      model,
+      maxSteps,
+      bus,
+      MessageProcessingMode.ONE_BY_ONE,
+      createUIMakerToolRegistry(),
+      uiHandler
+    );
+  }
+
   protected handle(message: AgentMessage): void {
     if (message.type === MESSAGE_TYPE_CONTROL_CLEAR) {
       this.clearContext();

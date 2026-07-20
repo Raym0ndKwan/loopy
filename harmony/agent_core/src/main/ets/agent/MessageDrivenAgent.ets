@@ -1,7 +1,8 @@
 import { AgentMessage, BusReader, MessageBus } from './MessageBus';
 import { AgentEvent, AgentEventKind } from './AgentEvent';
 import { ConversationContext } from './ConversationContext';
-import { ReActAgent, UiRenderHandler } from './ReActAgent';
+import { ReActAgent } from './ReActAgent';
+import { UiRenderHandler } from './ReActAgentRunner';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
 
@@ -164,7 +165,7 @@ export abstract class MessageDrivenAgent extends ReActAgent {
   private async executeRun(messages: AgentMessage[]): Promise<void> {
     let outcome: AgentRunOutcome | null = null;
     try {
-      await super.run(this.buildTask(messages), (event: AgentEvent): void => {
+      await this.executeTask(this.buildTask(messages), (event: AgentEvent): void => {
         if (outcome === null && event.kind === AgentEventKind.FINAL) {
           outcome = {
             kind: AgentRunOutcomeKind.FINAL,
