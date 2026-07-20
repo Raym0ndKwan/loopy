@@ -1,6 +1,6 @@
 import { AgentTool } from './AgentTool';
 
-/** Registered for prompts; actual rendering is currently handled by ReActAgent. */
+/** Registered for prompts; actual rendering is handled by the active ReAct runtime. */
 export class UiTool implements AgentTool {
   name(): string {
     return 'ui';

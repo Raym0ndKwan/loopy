@@ -1,9 +1,11 @@
 import { AgentEvent, AgentEventKind } from './AgentEvent';
 import {
+  MESSAGE_TAG_LEADER,
   MESSAGE_TYPE_CONTROL_CLEAR,
   MESSAGE_TYPE_INPUT,
   MESSAGE_TYPE_OTHERS,
-  MESSAGE_TYPE_OUTPUT
+  MESSAGE_TYPE_OUTPUT,
+  MESSAGE_TYPE_TASK_RESULT_UI
 } from './AgentMessageTypes';
 import { AgentMessage } from './MessageBus';
 import { MessageDrivenAgent } from './MessageDrivenAgent';
@@ -14,7 +16,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       this.clearContext();
       return;
     }
-    if (message.type !== MESSAGE_TYPE_INPUT) {
+    if (message.type !== MESSAGE_TYPE_INPUT && message.type !== MESSAGE_TYPE_TASK_RESULT_UI) {
       return;
     }
     this.enqueueMessage(message);
@@ -30,14 +32,14 @@ export class LeaderAgent extends MessageDrivenAgent {
     }
 
     this.bus.write({
-      type: `${MESSAGE_TYPE_OTHERS}.${event.kind}`,
+      type: `${MESSAGE_TYPE_OTHERS}.${MESSAGE_TAG_LEADER}.${event.kind}`,
       content: event.text
     });
   }
 
   protected onRunError(error: Error): void {
     this.bus.write({
-      type: `${MESSAGE_TYPE_OTHERS}.${AgentEventKind.ERROR}`,
+      type: `${MESSAGE_TYPE_OTHERS}.${MESSAGE_TAG_LEADER}.${AgentEventKind.ERROR}`,
       content: error.message
     });
   }

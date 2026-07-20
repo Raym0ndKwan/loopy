@@ -1,18 +1,49 @@
 import { common } from '@kit.AbilityKit';
 import {
+  A2uiAgentRunner,
+  A2uiComponentDef,
+  AgentEventKind,
   AgentMessage,
-  createConfiguredLoopToolRegistry,
+  createLeaderToolRegistry,
+  createA2uiModelInfo,
   createLoopModelInfo,
+  createUIMakerToolRegistry,
   LeaderAgent,
+  LEADER_AGENT_IDENTITY_PROMPT,
   LinkedMessageBus,
-  LOOP_AGENT_IDENTITY_PROMPT,
+  MESSAGE_TAG_UI_MAKER,
   MESSAGE_TYPE_CONTROL_CLEAR,
-  MessageBus
+  MESSAGE_TYPE_OTHERS,
+  MessageBus,
+  MessageProcessingMode,
+  parseJsonl,
+  ScriptedA2uiModel,
+  UIMakerAgent,
+  UI_MAKER_AGENT_IDENTITY_PROMPT,
+  UiRenderHandler
 } from '@loop/agent-core';
+import { A2uiFallbackView } from '../agenui/A2uiFallbackView';
+import { hasRenderableRoot, parseComponentsFromJsonl } from '../agenui/A2uiFallbackParser';
+import { componentsFromUiEvent } from '../agenui/LoopUiApplier';
 import { ChatInteractor } from '../interactor/ChatInteractor';
 
 const MAX_STEPS = 6;
 const WELCOME_TRANSCRIPT = 'Muti-Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+
+class AgentRuntime {
+  readonly leader: LeaderAgent;
+  readonly uiMaker: UIMakerAgent;
+
+  constructor(leader: LeaderAgent, uiMaker: UIMakerAgent) {
+    this.leader = leader;
+    this.uiMaker = uiMaker;
+  }
+
+  async close(): Promise<void> {
+    await this.leader.close();
+    await this.uiMaker.close();
+  }
+}
 
 @Entry
 @Component
@@ -20,11 +51,14 @@ struct Index {
   @State transcript: string = WELCOME_TRANSCRIPT;
   @State message: string = '';
   @State modelStatus: string = 'Checking model…';
+  @State uiComponents: A2uiComponentDef[] = [];
+  @State hasUiPanel: boolean = false;
 
   private scroller: Scroller = new Scroller();
   private bus: MessageBus = new LinkedMessageBus();
   private interactor: ChatInteractor = new ChatInteractor(this.bus);
-  private agentPromise: Promise<LeaderAgent> | null = null;
+  private agentsPromise: Promise<AgentRuntime> | null = null;
+  private lastUiTask: string = '';
 
   private getAbilityContext(): common.UIAbilityContext {
     return this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -37,18 +71,18 @@ struct Index {
         this.modelStatus = `Bus error: ${error.message}`;
       }
     );
-    this.agentPromise = this.createAgent();
-    this.agentPromise.catch((error: Error): void => {
+    this.agentsPromise = this.createAgents();
+    this.agentsPromise.catch((error: Error): void => {
       this.modelStatus = `Agent initialization failed: ${error.message}`;
-      this.agentPromise = null;
+      this.agentsPromise = null;
     });
   }
 
   aboutToDisappear(): void {
-    const agent = this.agentPromise;
-    this.agentPromise = null;
+    const agents = this.agentsPromise;
+    this.agentsPromise = null;
     this.interactor.stopListening().catch((_error: Error): void => {});
-    agent?.then(async (value: LeaderAgent): Promise<void> => value.close()).catch((_error: Error): void => {});
+    agents?.then(async (value: AgentRuntime): Promise<void> => value.close()).catch((_error: Error): void => {});
   }
 
   build() {
@@ -71,6 +105,30 @@ struct Index {
       }
       .width('100%')
       .margin({ bottom: 8 })
+
+      if (this.hasUiPanel) {
+        Column() {
+          Text('UImaker output')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+            .margin({ bottom: 6 })
+
+          Scroll() {
+            A2uiFallbackView({ components: this.uiComponents })
+              .width('100%')
+          }
+          .width('100%')
+          .height(220)
+        }
+        .width('100%')
+        .padding(12)
+        .margin({ bottom: 8 })
+        .borderRadius(12)
+        .backgroundColor(Color.White)
+        .border({ width: 1, color: $r('app.color.input_stroke') })
+      }
 
       Scroll(this.scroller) {
         Text(this.transcript)
@@ -128,10 +186,10 @@ struct Index {
     this.message = '';
 
     try {
-      if (this.agentPromise === null) {
-        this.agentPromise = this.createAgent();
+      if (this.agentsPromise === null) {
+        this.agentsPromise = this.createAgents();
       }
-      await this.agentPromise;
+      await this.agentsPromise;
       this.interactor.send(task);
     } catch (error) {
       const message = error instanceof Error ? error.message : `${error}`;
@@ -139,20 +197,56 @@ struct Index {
     }
   }
 
-  private async createAgent(): Promise<LeaderAgent> {
+  private async createAgents(): Promise<AgentRuntime> {
     const modelInfo = await createLoopModelInfo(this.getAbilityContext());
     this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
-    const tools = await createConfiguredLoopToolRegistry(this.getAbilityContext());
-    const agent = new LeaderAgent(
-      'Loop',
-      LOOP_AGENT_IDENTITY_PROMPT,
+    const uiHandler = await this.buildUiHandler();
+    const leader = new LeaderAgent(
+      'Leader',
+      LEADER_AGENT_IDENTITY_PROMPT,
       modelInfo.model,
       MAX_STEPS,
       this.bus,
-      tools
+      MessageProcessingMode.BATCH_PENDING,
+      createLeaderToolRegistry(this.bus)
     );
-    agent.startListening();
-    return agent;
+    const uiMaker = new UIMakerAgent(
+      'UImaker',
+      UI_MAKER_AGENT_IDENTITY_PROMPT,
+      modelInfo.model,
+      MAX_STEPS,
+      this.bus,
+      MessageProcessingMode.ONE_BY_ONE,
+      createUIMakerToolRegistry(),
+      uiHandler
+    );
+    uiMaker.startListening();
+    leader.startListening();
+    return new AgentRuntime(leader, uiMaker);
+  }
+
+  private async buildUiHandler(): Promise<UiRenderHandler> {
+    const a2uiInfo = await createA2uiModelInfo(this.getAbilityContext());
+    const runner = new A2uiAgentRunner(a2uiInfo.model);
+    const scripted = new ScriptedA2uiModel();
+
+    return async (description: string): Promise<string[]> => {
+      const lines: string[] = [];
+      const surfaceId = await runner.run(
+        description,
+        (line: string): void => {
+          lines.push(line);
+        },
+        (_message: string): void => {
+        }
+      );
+      if (surfaceId !== null && hasRenderableRoot(parseComponentsFromJsonl(lines))) {
+        return lines;
+      }
+
+      const fallbackRaw = await scripted.generate(description, surfaceId ?? 'uimaker_ui', undefined);
+      return parseJsonl(fallbackRaw);
+    };
   }
 
   private updateModelStatus(mode: 'llm' | 'scripted', modelName: string): void {
@@ -165,13 +259,43 @@ struct Index {
 
   private clearView(): void {
     this.transcript = WELCOME_TRANSCRIPT;
+    this.uiComponents = [];
+    this.hasUiPanel = false;
+    this.lastUiTask = '';
   }
 
   private handleBusMessage(message: AgentMessage): void {
     if (message.type === MESSAGE_TYPE_CONTROL_CLEAR) {
       this.clearView();
     }
+    if (message.type === this.uiMakerEventType(AgentEventKind.ACTION)) {
+      this.lastUiTask = this.extractUiTask(message.content);
+    }
+    if (message.type === this.uiMakerEventType(AgentEventKind.UI)) {
+      this.applyUiPayload(message.content);
+    }
     this.appendBusMessage(message);
+  }
+
+  private uiMakerEventType(kind: AgentEventKind): string {
+    return `${MESSAGE_TYPE_OTHERS}.${MESSAGE_TAG_UI_MAKER}.${kind}`;
+  }
+
+  private extractUiTask(action: string): string {
+    const open = action.indexOf('(');
+    const close = action.lastIndexOf(')');
+    if (open >= 0 && close > open) {
+      return action.substring(open + 1, close).trim();
+    }
+    return action.trim();
+  }
+
+  private applyUiPayload(jsonlPayload: string): void {
+    const fallbackTask = this.lastUiTask.length > 0
+      ? this.lastUiTask
+      : 'UImaker generated UI';
+    this.uiComponents = componentsFromUiEvent(jsonlPayload, fallbackTask);
+    this.hasUiPanel = this.uiComponents.length > 0;
   }
 
   private appendBusMessage(message: AgentMessage): void {

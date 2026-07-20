@@ -145,6 +145,9 @@ function verifySourceContracts() {
     modelScopeCandidateRollback
   );
   const registry = read('harmony/agent_core/src/main/ets/agent/ToolRegistry.ets');
+  const reactAgent = read('harmony/agent_core/src/main/ets/agent/ReActAgent.ets');
+  const leaderRegistry = read('harmony/agent_core/src/main/ets/agent/LeaderToolRegistry.ets');
+  const uiMakerRegistry = read('harmony/agent_core/src/main/ets/agent/UIMakerToolRegistry.ets');
   const demoEntry = read('harmony/entry/src/main/ets/pages/Index.ets');
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
   const socialHubStart = runtimeGateway.indexOf('async function callLocalSocialHubTool');
@@ -290,14 +293,24 @@ function verifySourceContracts() {
   assertContains(runner, "this.tools.has('modelscope')", 'ModelScope prompt is gated by actual registration');
   assertContains(index, "./src/main/ets/modelscope/ModelScopeTool", 'public export includes ModelScope');
   assert(!legacySocialPaths.some((path) => existsSync(path)), 'obsolete social bridge files are absent');
-  assertContains(demoEntry, 'loadConversation(this.getAbilityContext())', 'Loopy entry restores persisted conversation');
-  assertContains(demoEntry, 'saveConversation(this.getAbilityContext(), this.conversation)', 'Loopy entry persists completed turns');
-  assertContains(demoEntry, 'clearStoredConversation(this.getAbilityContext())', 'Loopy entry clears persisted conversation');
-  assertContains(demoEntry, 'createSkillSnapshot(context)', 'Loopy entry loads sandbox skills');
-  assertContains(demoEntry, 'createConfiguredLoopToolRegistry(context, skillSnapshot)', 'Loopy entry configures Skill and provider tools');
-  assertContains(demoEntry, 'registry.close()', 'Loopy entry closes configured tool registries');
-  assertContains(demoEntry, 'AgentEventKind.SKILL', 'Loopy entry renders selected Skill events');
-  assertContains(demoEntry, 'modelInfo.mode === \'llm\'', 'Loopy entry enables skills only for the LLM path');
+  assertContains(index, "./src/main/ets/agent/ConversationStore", 'public export preserves conversation persistence');
+  assertContains(index, "./src/main/ets/skill/SkillSnapshot", 'public export preserves Skill support');
+  assertContains(registry, 'private sealed: boolean = false', 'tool registry supports capability sealing');
+  assertContains(registry, 'this.ensureMutable()', 'sealed tool registries reject later mutation');
+  assertContains(reactAgent, 'tools: ToolRegistry,', 'ReAct agent requires an explicit tool registry');
+  assertContains(reactAgent, 'tools.seal()', 'ReAct agent seals capabilities during construction');
+  assertContains(leaderRegistry, 'registry.register(new CreateUiTaskTool(bus))', 'Leader registry explicitly injects UI task creation');
+  assertContains(leaderRegistry, 'registry.register(new TimeTool())', 'Leader registry explicitly injects time');
+  assertContains(uiMakerRegistry, 'registry.register(new TimeTool())', 'UImaker registry explicitly injects time');
+  assertContains(uiMakerRegistry, 'registry.register(new UiTool())', 'UImaker registry explicitly injects UI rendering');
+  assertContains(demoEntry, 'new LinkedMessageBus()', 'Loopy entry owns the shared message bus');
+  assertContains(demoEntry, 'new ChatInteractor(this.bus)', 'user interaction is routed through the bus');
+  assertContains(demoEntry, 'createLeaderToolRegistry(this.bus)', 'Loopy entry constructs the Leader registry explicitly');
+  assertContains(demoEntry, 'createUIMakerToolRegistry()', 'Loopy entry constructs the UImaker registry explicitly');
+  assertContains(demoEntry, 'MessageProcessingMode.BATCH_PENDING', 'Leader batches pending bus messages');
+  assertContains(demoEntry, 'MessageProcessingMode.ONE_BY_ONE', 'UImaker processes UI tasks one by one');
+  assertContains(demoEntry, 'this.interactor.send(task)', 'user input is written through the bus interactor');
+  assert(!demoEntry.includes('createConfiguredLoopToolRegistry'), 'role agents do not receive the legacy all-capability registry');
 }
 
 runHarBuild();

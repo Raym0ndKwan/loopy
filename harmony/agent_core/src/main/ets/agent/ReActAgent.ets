@@ -1,6 +1,5 @@
 import { Agent, AgentListener } from './Agent';
 import { AgentEvent, AgentEventKind } from './AgentEvent';
-import { AgentTool } from './AgentTool';
 import { ChatMessage, ConversationContext } from './ConversationContext';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
@@ -36,7 +35,7 @@ export class ReActAgent implements Agent {
     identityPrompt: string,
     model: LocalModel,
     maxSteps: number,
-    tools?: ToolRegistry,
+    tools: ToolRegistry,
     uiHandler?: UiRenderHandler,
     initialContext?: ConversationContext
   ) {
@@ -44,15 +43,12 @@ export class ReActAgent implements Agent {
     this.identityPrompt = identityPrompt.trim();
     this.model = model;
     this.maxSteps = maxSteps;
-    this.tools = tools ?? new ToolRegistry();
+    tools.seal();
+    this.tools = tools;
     this.uiHandler = uiHandler ?? null;
     this.conversation = initialContext === undefined
       ? new ConversationContext()
       : ConversationContext.fromMessages(initialContext.toChatMessages());
-  }
-
-  registerTool(tool: AgentTool): void {
-    this.tools.register(tool);
   }
 
   clearContext(): void {
@@ -107,10 +103,9 @@ export class ReActAgent implements Agent {
 
       let observation: string;
       try {
-        if (call.name === UI_TOOL_NAME) {
+        if (call.name === UI_TOOL_NAME && this.tools.has(UI_TOOL_NAME)) {
           if (this.uiHandler === null) {
-            this.finish(normalizedTask, call.input, listener);
-            return;
+            throw new Error('UI rendering is not available for this agent.');
           }
           observation = await this.runUiTool(call.input, listener);
         } else {
@@ -147,21 +142,16 @@ export class ReActAgent implements Agent {
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
     if (this.uiHandler === null) {
-      return 'UI rendering is not available for this agent.';
+      throw new Error('UI rendering is not available for this agent.');
     }
 
     const prompt = description.trim().length > 0 ? description : 'Simple information card';
-    try {
-      const lines = await this.uiHandler(prompt);
-      if (lines.length === 0) {
-        return 'UI tool returned no protocol data.';
-      }
-      listener(new AgentEvent(AgentEventKind.UI, lines.join('\n')));
-      return `Rendered on-screen UI (${lines.length} protocol lines) for: ${prompt}`;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : `${error}`;
-      return `UI render failed: ${message}`;
+    const lines = await this.uiHandler(prompt);
+    if (lines.length === 0) {
+      throw new Error('UI tool returned no protocol data.');
     }
+    listener(new AgentEvent(AgentEventKind.UI, lines.join('\n')));
+    return `Rendered on-screen UI (${lines.length} protocol lines) for: ${prompt}`;
   }
 
   private buildSystemPrompt(): string {
@@ -169,9 +159,29 @@ export class ReActAgent implements Agent {
     if (prompt.length > 0) {
       prompt += '\n\n';
     }
-    prompt += 'Use Thought, Action, Observation, and Final.\n';
-    prompt += 'Every tool call must use exactly this syntax on one line: Action: tool_name[input].\n';
-    prompt += 'Use only the tools listed in the current task prompt.\n';
+    prompt += 'STRICT REACT OUTPUT CONTRACT\n';
+    prompt += 'Every assistant response must use exactly one of the following two forms.\n\n';
+    prompt += 'Form 1 — finish or answer without a tool:\n';
+    prompt += 'Thought: <one brief sentence explaining the next decision>\n';
+    prompt += 'Final: <the answer or execution report>\n\n';
+    prompt += 'Form 2 — call exactly one tool:\n';
+    prompt += 'Thought: <one brief sentence explaining why the tool is needed>\n';
+    prompt += 'Action: <exact_tool_name>[<tool_input>]\n\n';
+    prompt += 'Rules:\n';
+    prompt += '- Start the response with Thought: and then output exactly one Action: or one Final:.\n';
+    prompt += '- Never return ordinary prose without the required labels, even for greetings or very simple questions.\n';
+    prompt += '- Do not output both Action: and Final: in the same response.\n';
+    prompt += '- Do not output more than one Action: in the same response.\n';
+    prompt += '- Do not output Observation:. The runtime supplies tool observations in the next prompt.\n';
+    prompt += '- Action must use a tool name exactly as listed under Tools in the current user prompt.\n';
+    prompt += '- Do not wrap the response in Markdown or code fences and do not add text before Thought:.\n';
+    prompt += '- The angle-bracket text in the forms above is explanatory placeholder text; never copy it literally.\n\n';
+    prompt += 'Direct-answer example:\n';
+    prompt += 'Thought: This greeting does not require a tool.\n';
+    prompt += 'Final: 你好！有什么可以帮你的？\n\n';
+    prompt += 'Tool-call format example (replace the placeholders with an actually listed tool and real input):\n';
+    prompt += 'Thought: I need an available tool to complete this request.\n';
+    prompt += 'Action: <exact_tool_name>[<tool_input>]\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user asks for an on-screen card, form, dashboard, or visual summary.\n';
     }

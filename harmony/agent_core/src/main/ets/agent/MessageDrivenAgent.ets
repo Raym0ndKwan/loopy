@@ -1,14 +1,30 @@
 import { AgentMessage, BusReader, MessageBus } from './MessageBus';
-import { AgentEvent } from './AgentEvent';
+import { AgentEvent, AgentEventKind } from './AgentEvent';
 import { ConversationContext } from './ConversationContext';
 import { ReActAgent, UiRenderHandler } from './ReActAgent';
 import { ToolRegistry } from './ToolRegistry';
 import { LocalModel } from '../model/LocalModel';
 
+export enum MessageProcessingMode {
+  ONE_BY_ONE = 'ONE_BY_ONE',
+  BATCH_PENDING = 'BATCH_PENDING'
+}
+
+export enum AgentRunOutcomeKind {
+  FINAL = 'final',
+  ERROR = 'error'
+}
+
+export interface AgentRunOutcome {
+  readonly kind: AgentRunOutcomeKind;
+  readonly text: string;
+}
+
 export abstract class MessageDrivenAgent extends ReActAgent {
   protected readonly bus: MessageBus;
 
   private readonly reader: BusReader;
+  private readonly processingMode: MessageProcessingMode;
   private listening: boolean = false;
   private stopped: boolean = false;
   private listenPromise: Promise<void> | null = null;
@@ -21,12 +37,14 @@ export abstract class MessageDrivenAgent extends ReActAgent {
     model: LocalModel,
     maxSteps: number,
     bus: MessageBus,
-    tools?: ToolRegistry,
+    processingMode: MessageProcessingMode,
+    tools: ToolRegistry,
     uiHandler?: UiRenderHandler,
     initialContext?: ConversationContext
   ) {
     super(name, identityPrompt, model, maxSteps, tools, uiHandler, initialContext);
     this.bus = bus;
+    this.processingMode = processingMode;
     this.reader = bus.getReader();
   }
 
@@ -110,6 +128,9 @@ export abstract class MessageDrivenAgent extends ReActAgent {
   protected onListeningError(_error: Error): void {
   }
 
+  protected onRunFinished(_messages: AgentMessage[], _outcome: AgentRunOutcome): void {
+  }
+
   private tryStartNextRun(): void {
     if (this.stopped || this.currentRun !== null || this.pendingMessages.length === 0) {
       return;
@@ -120,6 +141,11 @@ export abstract class MessageDrivenAgent extends ReActAgent {
   }
 
   private takePendingMessages(): AgentMessage[] {
+    if (this.processingMode === MessageProcessingMode.ONE_BY_ONE) {
+      const message = this.pendingMessages.shift();
+      return message === undefined ? [] : [message];
+    }
+
     const messages = this.pendingMessages.slice();
     this.pendingMessages = [];
     return messages;
@@ -136,8 +162,20 @@ export abstract class MessageDrivenAgent extends ReActAgent {
   }
 
   private async executeRun(messages: AgentMessage[]): Promise<void> {
+    let outcome: AgentRunOutcome | null = null;
     try {
       await super.run(this.buildTask(messages), (event: AgentEvent): void => {
+        if (outcome === null && event.kind === AgentEventKind.FINAL) {
+          outcome = {
+            kind: AgentRunOutcomeKind.FINAL,
+            text: event.text
+          };
+        } else if (outcome === null && event.kind === AgentEventKind.ERROR) {
+          outcome = {
+            kind: AgentRunOutcomeKind.ERROR,
+            text: event.text
+          };
+        }
         try {
           this.onAgentEvent(event);
         } catch (error) {
@@ -150,11 +188,30 @@ export abstract class MessageDrivenAgent extends ReActAgent {
       });
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(`${error}`);
+      outcome = {
+        kind: AgentRunOutcomeKind.ERROR,
+        text: normalized.message
+      };
       try {
         this.onRunError(normalized);
       } catch (_hookError) {
       }
     } finally {
+      if (outcome === null) {
+        outcome = {
+          kind: AgentRunOutcomeKind.ERROR,
+          text: 'Agent loop ended without a Final or Error result.'
+        };
+      }
+      try {
+        this.onRunFinished(messages, outcome);
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(`${error}`);
+        try {
+          this.onRunError(normalized);
+        } catch (_hookError) {
+        }
+      }
       this.currentRun = null;
       this.tryStartNextRun();
     }
