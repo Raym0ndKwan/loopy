@@ -151,6 +151,13 @@ function verifySourceContracts() {
   const uiMakerAgent = read('harmony/agent_core/src/main/ets/agent/UIMakerAgent.ets');
   const leaderRegistry = read('harmony/agent_core/src/main/ets/agent/LeaderToolRegistry.ets');
   const uiMakerRegistry = read('harmony/agent_core/src/main/ets/agent/UIMakerToolRegistry.ets');
+  const structuredAgent = read('harmony/agent_core/src/main/ets/agent/StructuredMessageDrivenAgent.ets');
+  const structuredBus = read('harmony/agent_core/src/main/ets/agent/message/LinkedMessageBus.ets');
+  const structuredLeader = read('harmony/agent_core/src/main/ets/agent/leader/LeaderAgent.ets');
+  const dataAgent = read('harmony/agent_core/src/main/ets/agent/data/DataAgent.ets');
+  const uiAgent = read('harmony/agent_core/src/main/ets/agent/ui/UiAgent.ets');
+  const actionAgent = read('harmony/agent_core/src/main/ets/agent/action/ActionAgent.ets');
+  const actionPlanRunner = read('harmony/agent_core/src/main/ets/agent/action/ActionPlanRunner.ets');
   const demoEntry = read('harmony/entry/src/main/ets/pages/Index.ets');
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
   const socialHubStart = runtimeGateway.indexOf('async function callLocalSocialHubTool');
@@ -314,7 +321,7 @@ function verifySourceContracts() {
   assertContains(leaderRegistry, 'registry.register(new TimeTool())', 'Leader registry explicitly injects time');
   assertContains(uiMakerRegistry, 'registry.register(new TimeTool())', 'UImaker registry explicitly injects time');
   assertContains(uiMakerRegistry, 'registry.register(new UiTool())', 'UImaker registry explicitly injects UI rendering');
-  assertContains(demoEntry, 'new LinkedMessageBus()', 'Loopy entry owns the shared message bus');
+  assertContains(demoEntry, 'new ReactLinkedMessageBus()', 'Loopy entry owns the ReAct message bus');
   assertContains(demoEntry, 'new ChatInteractor(this.bus)', 'user interaction is routed through the bus');
   assertContains(leaderAgent, 'createLeaderToolRegistry(bus)', 'Leader fixes its own capability registry');
   assertContains(uiMakerAgent, 'createUIMakerToolRegistry()', 'UImaker fixes its own capability registry');
@@ -325,6 +332,20 @@ function verifySourceContracts() {
   assert(!demoEntry.includes('MessageProcessingMode'), 'Loopy entry cannot choose role scheduling policies');
   assertContains(demoEntry, 'this.interactor.send(task)', 'user input is written through the bus interactor');
   assert(!demoEntry.includes('createConfiguredLoopToolRegistry'), 'role agents do not receive the legacy all-capability registry');
+  assertContains(index, 'ReactLinkedMessageBus', 'public exports disambiguate the ReAct message bus');
+  assertContains(index, 'StructuredMessageDrivenAgent', 'public exports the structured subscriber base');
+  assertContains(structuredAgent, 'bus.openReader()', 'structured agents subscribe directly to their bus');
+  for (const [name, source] of [
+    ['Leader', structuredLeader],
+    ['Data', dataAgent],
+    ['UI', uiAgent],
+    ['Action', actionAgent]
+  ]) {
+    assertContains(source, 'extends StructuredMessageDrivenAgent', `${name} uses the structured subscriber base`);
+  }
+  assertContains(structuredBus, 'reclaimAcknowledged()', 'structured bus reclaims acknowledged messages');
+  assertContains(actionAgent, 'this.catalog.validateRegisteredStep', 'Action executes only catalog-registered steps');
+  assertContains(actionPlanRunner, 'resolveJsonPointer(source, bindings[index].path)', 'Action workflow passes prior output by JSON Pointer');
 }
 
 runHarBuild();

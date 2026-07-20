@@ -48,7 +48,9 @@ class AiphoneTool implements AgentTool {
       promptForTool,
       this.request.surfaceId,
       this.request.actionId,
-      this.mergeArgs(this.request.args, parsedArgs)
+      this.mergeArgs(this.request.args, parsedArgs),
+      this.request.ignoreToolSurfaceUpdates === true,
+      this.callbacks.onA2uiSurface === undefined ? null : this.callbacks.onA2uiSurface
     );
     for (const line of splitJsonl(jsonl)) {
       this.callbacks.onA2uiJsonl?.(line);
@@ -179,6 +181,9 @@ function calendarToolDescription(definition: ToolDefinition): string {
 }
 
 export function aiphoneToolDescriptionForModel(toolId: string): string {
+  if (isSurfaceDerivedHotelActionId(toolId)) {
+    return '';
+  }
   const definitions = allToolDefinitions();
   for (let index = 0; index < definitions.length; index++) {
     if (definitions[index].toolId === toolId) {
@@ -188,6 +193,10 @@ export function aiphoneToolDescriptionForModel(toolId: string): string {
   return '';
 }
 
+export function isSurfaceDerivedHotelActionId(toolId: string): boolean {
+  return toolId === 'hotel.navigate' || toolId === 'hotel.call';
+}
+
 export class LoopBackend {
   async run(request: LoopBackendRequest, callbacks: LoopBackendCallbacks): Promise<LoopRunResult> {
     const conversation = this.buildConversation(request);
@@ -195,6 +204,7 @@ export class LoopBackend {
     let a2uiLineCount = 0;
     const a2uiCallbacks: LoopBackendCallbacks = {
       onEvent: callbacks.onEvent,
+      onA2uiSurface: callbacks.onA2uiSurface,
       onA2uiJsonl: (line: string): void => {
         a2uiLineCount++;
         callbacks.onA2uiJsonl?.(line);
@@ -280,6 +290,9 @@ export class LoopBackend {
     const currentPrompt = request.userPrompt === undefined || request.userPrompt.trim().length === 0 ?
       request.prompt : request.userPrompt;
     for (const definition of allToolDefinitions()) {
+      if (isSurfaceDerivedHotelActionId(definition.toolId)) {
+        continue;
+      }
       if (definition.toolId === 'luckin.order.preview' && !isExplicitLuckinOrderPrompt(currentPrompt)) {
         continue;
       }

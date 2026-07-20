@@ -1,22 +1,22 @@
 import {
-  AgentMessage,
-  BusReader,
   MESSAGE_TYPE_CONTROL_CLEAR,
   MESSAGE_TYPE_INPUT,
-  MessageBus
+  ReactAgentMessage,
+  ReactBusReader,
+  ReactMessageBus
 } from '@loop/agent-core';
 
-export type ChatMessageListener = (message: AgentMessage) => void;
+export type ChatMessageListener = (message: ReactAgentMessage) => void;
 export type ChatInteractorErrorListener = (error: Error) => void;
 
 export class ChatInteractor {
-  private readonly bus: MessageBus;
-  private readonly reader: BusReader;
+  private readonly bus: ReactMessageBus;
+  private readonly reader: ReactBusReader;
   private listening: boolean = false;
   private stopped: boolean = false;
   private listenPromise: Promise<void> | null = null;
 
-  constructor(bus: MessageBus) {
+  constructor(bus: ReactMessageBus) {
     this.bus = bus;
     this.reader = bus.getReader();
   }
@@ -94,7 +94,7 @@ export class ChatInteractor {
     errorListener?: ChatInteractorErrorListener
   ): Promise<void> {
     while (this.listening) {
-      const message = await this.reader.receive();
+      const message: ReactAgentMessage | null = await this.reader.receive();
       if (message === null) {
         return;
       }

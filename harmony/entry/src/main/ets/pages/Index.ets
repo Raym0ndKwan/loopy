@@ -3,16 +3,16 @@ import {
   A2uiAgentRunner,
   A2uiComponentDef,
   AgentEventKind,
-  AgentMessage,
   createA2uiModelInfo,
   createLoopModelInfo,
-  LeaderAgent,
-  LinkedMessageBus,
   MESSAGE_TAG_UI_MAKER,
   MESSAGE_TYPE_CONTROL_CLEAR,
   MESSAGE_TYPE_OTHERS,
-  MessageBus,
   parseJsonl,
+  ReactAgentMessage,
+  ReactLeaderAgent,
+  ReactLinkedMessageBus,
+  ReactMessageBus,
   ScriptedA2uiModel,
   UIMakerAgent,
   UiRenderHandler
@@ -26,10 +26,10 @@ const MAX_STEPS = 6;
 const WELCOME_TRANSCRIPT = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
 
 class AgentRuntime {
-  readonly leader: LeaderAgent;
+  readonly leader: ReactLeaderAgent;
   readonly uiMaker: UIMakerAgent;
 
-  constructor(leader: LeaderAgent, uiMaker: UIMakerAgent) {
+  constructor(leader: ReactLeaderAgent, uiMaker: UIMakerAgent) {
     this.leader = leader;
     this.uiMaker = uiMaker;
   }
@@ -50,7 +50,7 @@ struct Index {
   @State hasUiPanel: boolean = false;
 
   private scroller: Scroller = new Scroller();
-  private bus: MessageBus = new LinkedMessageBus();
+  private bus: ReactMessageBus = new ReactLinkedMessageBus();
   private interactor: ChatInteractor = new ChatInteractor(this.bus);
   private agentsPromise: Promise<AgentRuntime> | null = null;
   private lastUiTask: string = '';
@@ -61,7 +61,7 @@ struct Index {
 
   aboutToAppear(): void {
     this.interactor.startListening(
-      (message: AgentMessage): void => this.handleBusMessage(message),
+      (message: ReactAgentMessage): void => this.handleBusMessage(message),
       (error: Error): void => {
         this.modelStatus = `Bus error: ${error.message}`;
       }
@@ -196,7 +196,7 @@ struct Index {
     const modelInfo = await createLoopModelInfo(this.getAbilityContext());
     this.updateModelStatus(modelInfo.mode, modelInfo.modelName);
     const uiHandler = await this.buildUiHandler();
-    const leader = new LeaderAgent(
+    const leader = new ReactLeaderAgent(
       modelInfo.model,
       MAX_STEPS,
       this.bus
@@ -251,7 +251,7 @@ struct Index {
     this.lastUiTask = '';
   }
 
-  private handleBusMessage(message: AgentMessage): void {
+  private handleBusMessage(message: ReactAgentMessage): void {
     if (message.type === MESSAGE_TYPE_CONTROL_CLEAR) {
       this.clearView();
     }
@@ -285,7 +285,7 @@ struct Index {
     this.hasUiPanel = this.uiComponents.length > 0;
   }
 
-  private appendBusMessage(message: AgentMessage): void {
+  private appendBusMessage(message: ReactAgentMessage): void {
     const prefix = this.transcript.trim().length === 0 ? '' : '\n\n';
     const content = message.content.length > 0 ? `\n${message.content}` : '';
     this.transcript += `${prefix}[${message.type}]${content}`;
