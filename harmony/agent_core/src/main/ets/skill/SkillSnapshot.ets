@@ -64,9 +64,10 @@ export function buildLoopSystemPrompt(snapshot: SkillSnapshot | null): string {
 }
 
 export function buildReActFormatRules(): string {
-  return ' Every reply MUST include Thought: on its own line, then exactly one of:\n'
-    + '- Action: tool_name[input]  (e.g. Action: time[], Action: read[weather])\n'
-    + '- Final: answer\n'
+  return ' Every reply MUST include Thought: on its own line, then Execution: parallel or Execution: serial, then one or more Action: lines, OR Final: answer.\n'
+    + '- Single tool: Execution: serial then Action: tool_name[input]\n'
+    + '- Parallel tools (independent only): Execution: parallel then multiple Action: lines, one per tool\n'
+    + '- Serial multi-tool: Execution: serial then multiple Action: lines in order\n'
     + 'Do not use markdown bold, bullets, or code blocks on Action/Final lines. '
     + 'Use only listed tools.';
 }

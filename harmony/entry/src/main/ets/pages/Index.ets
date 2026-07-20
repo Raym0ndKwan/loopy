@@ -1,5 +1,6 @@
 import { A2uiComponentDef } from '@loop/agent-core';
 import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   AgentEvent,
   AgentEventKind,
@@ -26,6 +27,8 @@ import { componentsFromUiEvent } from '../agenui/LoopUiApplier';
 
 const MAX_STEPS = 6;
 const WELCOME_TRANSCRIPT = 'Loop is ready. Ask anything — I will show a UI card when helpful.\n';
+const LOG_DOMAIN = 0x0000;
+const LOG_TAG = 'loopy';
 
 @Entry
 @Component
@@ -342,6 +345,7 @@ struct Index {
   }
 
   private appendLine(speaker: string, text: string): void {
+    hilog.info(LOG_DOMAIN, LOG_TAG, '[loopy] %{public}s\n%{public}s', speaker, text);
     const prefix = this.transcript.trim().length === 0 ? '' : '\n\n';
     this.transcript += `${prefix}${speaker}\n${text}`;
     this.scroller.scrollEdge(Edge.Bottom);

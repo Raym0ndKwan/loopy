@@ -10,7 +10,9 @@ export type UiRenderHandler = (description: string) => Promise<string[]>;
 
 const UI_TOOL_NAME = 'ui';
 const READ_TOOL_NAME = 'read';
-const REACT_TAGS: string[] = ['Thought:', 'Action:', 'Observation:', 'Final:'];
+const REACT_TAGS: string[] = ['Thought:', 'Execution:', 'Action:', 'Observation:', 'Final:'];
+
+type ExecutionMode = 'parallel' | 'serial';
 
 class ToolCall {
   name: string;
@@ -19,6 +21,16 @@ class ToolCall {
   constructor(name: string, input: string) {
     this.name = name;
     this.input = input;
+  }
+}
+
+class ActionPlan {
+  mode: ExecutionMode;
+  calls: ToolCall[];
+
+  constructor(mode: ExecutionMode, calls: ToolCall[]) {
+    this.mode = mode;
+    this.calls = calls;
   }
 }
 
@@ -67,43 +79,89 @@ export class ReActAgentRunner {
         return;
       }
 
-      const call = this.parseAction(response);
-      if (call === null) {
+      const plan = this.parseActionPlan(response);
+      if (plan === null) {
         listener(new AgentEvent(AgentEventKind.ERROR, 'Model did not return an Action or Final answer.'));
         return;
       }
 
-      listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+      skillLogInfo(`ReActAgentRunner: execution=${plan.mode} toolCount=${plan.calls.length}`);
 
-      let observation: string;
+      const observations: string[] = [];
       try {
-        if (call.name === UI_TOOL_NAME) {
-          if (this.uiHandler === null) {
-            listener(new AgentEvent(AgentEventKind.FINAL, call.input));
-            return;
+        if (plan.mode === 'parallel' && plan.calls.length > 1) {
+          const settled = await Promise.allSettled(
+            plan.calls.map((call: ToolCall) => this.executeToolCall(call, listener))
+          );
+          for (let index = 0; index < plan.calls.length; index++) {
+            const call = plan.calls[index];
+            const result = settled[index];
+            let observation: string;
+            if (result.status === 'fulfilled') {
+              if (result.value === null) {
+                return;
+              }
+              observation = result.value;
+            } else {
+              const message = result.reason instanceof Error ? result.reason.message : `${result.reason}`;
+              observation = `Tool ${call.name} failed: ${message}`;
+            }
+            listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+            listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
+            observations.push(observation);
           }
-          observation = await this.runUiTool(call.input, listener);
         } else {
-          if (call.name === READ_TOOL_NAME) {
-            skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
-          }
-          observation = await this.tools.run(call.name, call.input);
-          if (call.name === READ_TOOL_NAME) {
-            this.emitSkillRead(call.input, observation, listener);
+          for (let index = 0; index < plan.calls.length; index++) {
+            const call = plan.calls[index];
+            const observation = await this.executeToolCall(call, listener);
+            if (observation === null) {
+              return;
+            }
+            listener(new AgentEvent(AgentEventKind.ACTION, `${call.name}(${call.input})`));
+            listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
+            observations.push(observation);
           }
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : `${error}`;
-        listener(new AgentEvent(AgentEventKind.ERROR, `Tool ${call.name} failed: ${message}`));
+        listener(new AgentEvent(AgentEventKind.ERROR, message));
         return;
       }
 
       scratchpad.push(response);
-      scratchpad.push(`Observation: ${observation}`);
-      listener(new AgentEvent(AgentEventKind.OBSERVATION, observation));
+      for (const observation of observations) {
+        scratchpad.push(`Observation: ${observation}`);
+      }
     }
 
     listener(new AgentEvent(AgentEventKind.ERROR, `Stopped after ${this.maxSteps} steps without a final answer.`));
+  }
+
+  private async executeToolCall(call: ToolCall, listener: AgentListener): Promise<string | null> {
+    if (call.name === UI_TOOL_NAME) {
+      if (this.uiHandler === null) {
+        listener(new AgentEvent(AgentEventKind.FINAL, call.input));
+        return null;
+      }
+      return await this.runUiTool(call.input, listener);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      skillLogInfo(`ReActAgentRunner: executing skill read input=${call.input}`);
+    }
+
+    let observation: string;
+    try {
+      observation = await this.tools.run(call.name, call.input);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      throw new Error(`Tool ${call.name} failed: ${message}`);
+    }
+
+    if (call.name === READ_TOOL_NAME) {
+      this.emitSkillRead(call.input, observation, listener);
+    }
+    return observation;
   }
 
   private emitSkillRead(input: string, observation: string, listener: AgentListener): void {
@@ -118,6 +176,22 @@ export class ReActAgentRunner {
     } else {
       skillLogWarn(`ReActAgentRunner: skill content returned but snapshot lookup failed input=${input}`);
     }
+  }
+
+  private parseJsonAction(action: string): ToolCall | null {
+    const trimmed = action.trim();
+    if (!trimmed.startsWith('{')) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
+      const operation = `${parsed.operation ?? ''}`;
+      if (operation === 'search' || operation === 'execute') {
+        return new ToolCall('modelscope', trimmed);
+      }
+    } catch (_error) {
+    }
+    return null;
   }
 
   private async runUiTool(description: string, listener: AgentListener): Promise<string> {
@@ -142,6 +216,7 @@ export class ReActAgentRunner {
   private buildPrompt(task: string, scratchpad: string[], conversation?: ConversationContext): string {
     let prompt = 'You are Loop, a HarmonyOS ReAct agent with tools.\n';
     prompt += 'Use Thought, Action, Observation, and Final.\n';
+    prompt += this.buildParallelExecutionRules();
     prompt += 'Every tool call must use exactly this syntax on one line: Action: tool_name[input]. The tool name is mandatory; never put raw JSON directly after Action:.\n';
     if (this.uiHandler !== null) {
       prompt += 'Use the ui tool when the user wants something shown on screen (card, form, dashboard, visual summary).\n';
@@ -188,6 +263,10 @@ export class ReActAgentRunner {
     const thought = this.readLineValue(response, 'Thought:');
     if (thought !== null) {
       listener(new AgentEvent(AgentEventKind.THOUGHT, thought));
+    }
+    const execution = this.readLineValue(response, 'Execution:');
+    if (execution !== null) {
+      skillLogInfo(`ReActAgentRunner: model chose execution=${execution.trim().toLowerCase()}`);
     }
   }
 
@@ -241,12 +320,62 @@ export class ReActAgentRunner {
     return previous === '\n' || previous === '\r' || previous === ' ' || previous === '\t';
   }
 
-  private parseAction(response: string): ToolCall | null {
-    const action = this.readLineValue(response, 'Action:');
-    if (action === null) {
+  private parseActionPlan(response: string): ActionPlan | null {
+    const actionTexts = this.extractTaggedLines(response, 'Action:');
+    if (actionTexts.length === 0) {
       return null;
     }
 
+    const calls: ToolCall[] = [];
+    for (let index = 0; index < actionTexts.length; index++) {
+      const call = this.parseActionText(actionTexts[index]);
+      if (call !== null) {
+        calls.push(call);
+      }
+    }
+    if (calls.length === 0) {
+      return null;
+    }
+
+    return new ActionPlan(this.parseExecutionMode(response, calls), calls);
+  }
+
+  private parseExecutionMode(response: string, calls: ToolCall[]): ExecutionMode {
+    const raw = this.readLineValue(response, 'Execution:');
+    if (raw === null) {
+      return 'serial';
+    }
+
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'parallel' && calls.length > 1 && !this.hasParallelUnsafeTools(calls)) {
+      return 'parallel';
+    }
+    return 'serial';
+  }
+
+  private hasParallelUnsafeTools(calls: ToolCall[]): boolean {
+    for (let index = 0; index < calls.length; index++) {
+      const name = calls[index].name;
+      if (name === READ_TOOL_NAME || name === UI_TOOL_NAME || name === 'composio' || name === 'modelscope') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private extractTaggedLines(text: string, prefix: string): string[] {
+    const values: string[] = [];
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index++) {
+      const trimmed = lines[index].trim();
+      if (trimmed.startsWith(prefix)) {
+        values.push(trimmed.substring(prefix.length).trim());
+      }
+    }
+    return values;
+  }
+
+  private parseActionText(action: string): ToolCall | null {
     const bracketCall = this.parseDelimitedAction(action, '[', ']');
     if (bracketCall !== null) {
       return bracketCall;
@@ -257,28 +386,15 @@ export class ReActAgentRunner {
       return parenCall;
     }
 
-    const jsonCall = this.parseJsonAction(action);
-    if (jsonCall !== null) {
-      return jsonCall;
-    }
-
-    return null;
+    return this.parseJsonAction(action);
   }
 
-  private parseJsonAction(action: string): ToolCall | null {
-    const trimmed = action.trim();
-    if (!trimmed.startsWith('{')) {
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(trimmed) as Record<string, Object | string | number | boolean | null | undefined>;
-      const operation = `${parsed.operation ?? ''}`;
-      if (operation === 'search' || operation === 'execute') {
-        return new ToolCall('modelscope', trimmed);
-      }
-    } catch (_error) {
-    }
-    return null;
+  private buildParallelExecutionRules(): string {
+    return 'Before calling tools, decide whether they can run in parallel. Add Execution: parallel or Execution: serial on its own line after Thought:.\n'
+      + 'Use Execution: parallel only when every Action in this reply is independent (no output from one is needed by another). Good examples: time[] plus note[...].\n'
+      + 'Use Execution: serial when tools depend on each other, when using read or ui, or when composio/modelscope needs search then execute across steps.\n'
+      + 'For parallel execution, emit multiple Action: lines (one tool per line). For serial execution with multiple tools, also emit multiple Action: lines in the required order.\n'
+      + 'For a single independent tool, use Execution: serial with one Action: line.\n';
   }
 
   private parseDelimitedAction(action: string, openToken: string, closeToken: string): ToolCall | null {
