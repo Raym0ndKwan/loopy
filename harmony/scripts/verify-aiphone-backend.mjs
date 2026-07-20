@@ -184,6 +184,8 @@ function verifySourceContracts() {
     'train.search',
     'flight.search',
     'food.search',
+    'hotel.search',
+    'hotel.detail',
     'social.reply.draft',
     'mail.search',
     'mail.thread.read',
@@ -218,6 +220,7 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalTrainSearch', 'runtime includes train execution');
   assertContains(runtimeGateway, 'async function callLocalFlightSearch', 'runtime includes flight execution');
   assertContains(runtimeGateway, 'async function callLocalFoodSearch', 'runtime includes food execution');
+  assertContains(runtimeGateway, 'async function callLocalHotelTool', 'runtime includes hotel execution');
   assertContains(runtimeGateway, 'async function callLocalMailTool', 'runtime includes aggregate mail execution');
   assertContains(runtimeGateway, 'async function callLocalGmailTool', 'runtime includes Gmail execution');
   assertContains(runtimeGateway, 'async function callLocalMediaTool', 'runtime includes media video execution');

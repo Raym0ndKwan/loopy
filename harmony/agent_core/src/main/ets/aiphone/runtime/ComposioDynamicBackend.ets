@@ -317,6 +317,24 @@ function ownerNameFromPrompt(prompt: string): string {
 export function normalizedComposioUseCase(prompt: string, fixedToolId: string = ''): string {
   const keyword = promptSearchKeyword(prompt);
   const toolkit = composioToolkitFromPrompt(prompt);
+  if (fixedToolId === 'social.x.profile') {
+    return 'Get authenticated X Twitter user profile';
+  }
+  if (fixedToolId === 'social.x.dm.list') {
+    return 'List recent X Twitter direct message events';
+  }
+  if (fixedToolId === 'social.slack.message.search') {
+    return 'Search recent Slack direct messages';
+  }
+  if (fixedToolId === 'social.instagram.conversations.list') {
+    return 'List Instagram messaging conversations';
+  }
+  if (fixedToolId === 'social.instagram.profile') {
+    return 'Get authenticated Instagram user profile';
+  }
+  if (fixedToolId === 'social.instagram.messages.list') {
+    return 'List messages in an Instagram conversation';
+  }
   if (fixedToolId === 'whatsapp.phone_numbers.list') {
     return 'List WhatsApp Business phone numbers for the authenticated account';
   }
@@ -505,6 +523,43 @@ function fixedArgumentAliases(toolId: string): FixedArgumentAlias[] {
       { source: 'previewUrl', targets: ['preview_url'] }
     ];
   }
+  if (toolId === 'social.x.dm.list') {
+    return [
+      { source: 'maxResults', targets: ['max_results', 'maxResults'] },
+      { source: 'expansions', targets: ['expansions'] },
+      { source: 'eventTypes', targets: ['event_types'] },
+      { source: 'userFields', targets: ['user_fields'] },
+      { source: 'dmEventFields', targets: ['dm_event_fields'] }
+    ];
+  }
+  if (toolId === 'social.x.profile') {
+    return [
+      { source: 'userFields', targets: ['user_fields'] }
+    ];
+  }
+  if (toolId === 'social.slack.message.search') {
+    return [
+      { source: 'query', targets: ['query'] },
+      { source: 'sort', targets: ['sort'] },
+      { source: 'count', targets: ['count'] }
+    ];
+  }
+  if (toolId === 'social.instagram.conversations.list') {
+    return [
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
+  if (toolId === 'social.instagram.profile') {
+    return [
+      { source: 'igUserId', targets: ['ig_user_id'] }
+    ];
+  }
+  if (toolId === 'social.instagram.messages.list') {
+    return [
+      { source: 'conversationId', targets: ['conversation_id'] },
+      { source: 'limit', targets: ['limit'] }
+    ];
+  }
   if (toolId === 'x.post.search') {
     return [
       { source: 'query', targets: ['query', 'q', 'search', 'keyword'] },
@@ -615,6 +670,12 @@ function missingFixedWriteArgs(fixedToolId: string, fixedArgs: Object | null): s
 }
 
 export function composioExactToolSlugForFixedTool(fixedToolId: string): string {
+  if (fixedToolId === 'social.x.profile') return 'TWITTER_USER_LOOKUP_ME';
+  if (fixedToolId === 'social.x.dm.list') return 'TWITTER_GET_RECENT_DM_EVENTS';
+  if (fixedToolId === 'social.slack.message.search') return 'SLACK_SEARCH_MESSAGES';
+  if (fixedToolId === 'social.instagram.profile') return 'INSTAGRAM_GET_USER_INFO';
+  if (fixedToolId === 'social.instagram.conversations.list') return 'INSTAGRAM_LIST_ALL_CONVERSATIONS';
+  if (fixedToolId === 'social.instagram.messages.list') return 'INSTAGRAM_LIST_ALL_MESSAGES';
   if (fixedToolId === 'whatsapp.phone_numbers.list') return 'WHATSAPP_GET_PHONE_NUMBERS';
   if (fixedToolId === 'whatsapp.message.send') return 'WHATSAPP_SEND_MESSAGE';
   if (fixedToolId === 'calendar.events.search') return 'GOOGLECALENDAR_EVENTS_LIST';
@@ -920,6 +981,11 @@ function isPaginationTokenName(name: string): boolean {
   return lower.indexOf('token') >= 0 || lower.indexOf('cursor') >= 0;
 }
 
+function isOpaqueIdentifierName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === 'id' || lower.endsWith('_id') || lower.endsWith('id');
+}
+
 function driveQueryFor(keyword: string): string {
   const escaped = keyword.replace(/'/g, "\\'");
   return "name contains '" + escaped + "' and trashed = false";
@@ -1075,6 +1141,9 @@ export function composioArgumentsForTool(
     if (args[name] === undefined && shouldPreserveMissingFixedWriteArg(fixedToolId, name)) {
       return;
     }
+    if (args[name] === undefined && isOpaqueIdentifierName(name)) {
+      return;
+    }
     if (args[name] === undefined && properties[name] !== undefined) {
       args[name] = fallbackValueForProperty(name, properties[name], prompt);
     }
@@ -1120,7 +1189,8 @@ function nestedStringField(record: Record<string, Object | string | number | boo
 }
 
 function itemTitle(item: Object, index: number): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const title = stringField(record, ['title', 'name', 'subject', 'filename', 'file_name', 'display_name', 'event_name']);
   if (title.length > 0) {
     return title;
@@ -1137,7 +1207,8 @@ function itemTitle(item: Object, index: number): string {
 }
 
 function itemDetail(item: Object): string {
-  const record = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const wrapper = item as Record<string, Object | string | number | boolean | null | undefined>;
+  const record = objectRecord(wrapper.data) || wrapper;
   const parts: string[] = [];
   const number = stringField(record, ['number', 'id']);
   if (number.length > 0) {
