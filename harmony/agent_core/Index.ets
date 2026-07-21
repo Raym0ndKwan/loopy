@@ -1,39 +1,9 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
-export {
-  MESSAGE_TAG_LEADER,
-  MESSAGE_TAG_UI_MAKER,
-  MESSAGE_TYPE_CONTROL_CLEAR,
-  MESSAGE_TYPE_INPUT,
-  MESSAGE_TYPE_OUTPUT,
-  MESSAGE_TYPE_OTHERS,
-  MESSAGE_TYPE_TASK_CREATE_UI,
-  MESSAGE_TYPE_TASK_RESULT_UI
-} from './src/main/ets/agent/AgentMessageTypes';
-export { CreateUiTaskTool } from './src/main/ets/agent/CreateUiTaskTool';
-export { LeaderAgent as ReactLeaderAgent } from './src/main/ets/agent/LeaderAgent';
-export {
-  AgentMessage as ReactAgentMessage,
-  BusReader as ReactBusReader,
-  MessageBus as ReactMessageBus,
-  LinkedMessageBus as ReactLinkedMessageBus
-} from './src/main/ets/agent/MessageBus';
-export {
-  AgentRunOutcome,
-  AgentRunOutcomeKind,
-  MessageDrivenAgent as ReactMessageDrivenAgent,
-  MessageProcessingMode
-} from './src/main/ets/agent/MessageDrivenAgent';
-export { ReActAgent } from './src/main/ets/agent/ReActAgent';
-export { LOOP_AGENT_IDENTITY_PROMPT } from './src/main/ets/agent/LoopAgentPrompt';
 export { TimeTool } from './src/main/ets/agent/TimeTool';
-export { UIMakerAgent } from './src/main/ets/agent/UIMakerAgent';
 export * from './src/main/ets/agent/message/AgentMessage';
 export * from './src/main/ets/agent/message/DataResult';
 export { AgentMessageReader, LinkedMessageBus } from './src/main/ets/agent/message/LinkedMessageBus';
-export {
-  StructuredMessageDrivenAgent,
-  StructuredMessageDrivenAgent as MessageDrivenAgent
-} from './src/main/ets/agent/StructuredMessageDrivenAgent';
+export { MessageDrivenAgent } from './src/main/ets/agent/MessageDrivenAgent';
 export { LeaderAgent } from './src/main/ets/agent/leader/LeaderAgent';
 export * from './src/main/ets/agent/leader/LeaderTypes';
 export { DataAgent } from './src/main/ets/agent/data/DataAgent';
@@ -42,6 +12,7 @@ export { UiAgent } from './src/main/ets/agent/ui/UiAgent';
 export * from './src/main/ets/agent/ui/UiAgentTypes';
 export { ActionCatalog } from './src/main/ets/agent/action/ActionCatalog';
 export * from './src/main/ets/agent/action/ActionCatalogTypes';
+export * from './src/main/ets/agent/action/ActionOfferTypes';
 export * from './src/main/ets/agent/action/ActionPlanTypes';
 export {
   JsonPointerResult,
@@ -85,7 +56,9 @@ export * from './src/main/ets/composio/ComposioUserId';
 export { A2UI_VERSION, AGENUI_CATALOG_ID, buildCreateSurface, buildDeleteSurface, parseJsonl, extractJsonObjects, newSurfaceId } from './src/main/ets/a2ui/A2uiProtocol';
 export { A2uiComponentDef, CreateSurfaceBody, UpdateComponentsBody } from './src/main/ets/a2ui/A2uiTypes';
 export { A2uiModel } from './src/main/ets/a2ui/A2uiModel';
-export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener } from './src/main/ets/a2ui/A2uiAgentRunner';
+export { A2uiAgentRunner, A2uiLineListener, A2uiErrorListener, UiLayoutPlanner } from './src/main/ets/a2ui/A2uiAgentRunner';
+export { mergeA2uiLayout } from './src/main/ets/a2ui/A2uiLayoutMerger';
+export { OpenAiA2uiModel } from './src/main/ets/a2ui/OpenAiA2uiModel';
 export { createA2uiModelInfo, A2uiModelInfo } from './src/main/ets/a2ui/A2uiModelFactory';
 export { LoopBackend, aiphoneToolDescriptionForModel, isExplicitLuckinOrderPrompt, isSurfaceDerivedHotelActionId, parseLoopToolInputArgs } from './src/main/ets/aiphone/LoopBackend';
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
