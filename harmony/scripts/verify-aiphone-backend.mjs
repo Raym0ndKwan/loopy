@@ -145,12 +145,16 @@ function verifySourceContracts() {
     modelScopeCandidateRollback
   );
   const registry = read('harmony/agent_core/src/main/ets/agent/ToolRegistry.ets');
-  const reactAgent = read('harmony/agent_core/src/main/ets/agent/ReActAgent.ets');
   const reactRunner = read('harmony/agent_core/src/main/ets/agent/ReActAgentRunner.ets');
-  const leaderAgent = read('harmony/agent_core/src/main/ets/agent/LeaderAgent.ets');
-  const uiMakerAgent = read('harmony/agent_core/src/main/ets/agent/UIMakerAgent.ets');
-  const leaderRegistry = read('harmony/agent_core/src/main/ets/agent/LeaderToolRegistry.ets');
-  const uiMakerRegistry = read('harmony/agent_core/src/main/ets/agent/UIMakerToolRegistry.ets');
+  const messageDrivenAgent = read('harmony/agent_core/src/main/ets/agent/MessageDrivenAgent.ets');
+  const structuredBus = read('harmony/agent_core/src/main/ets/agent/message/LinkedMessageBus.ets');
+  const structuredLeader = read('harmony/agent_core/src/main/ets/agent/leader/LeaderAgent.ets');
+  const dataAgent = read('harmony/agent_core/src/main/ets/agent/data/DataAgent.ets');
+  const uiAgent = read('harmony/agent_core/src/main/ets/agent/ui/UiAgent.ets');
+  const actionAgent = read('harmony/agent_core/src/main/ets/agent/action/ActionAgent.ets');
+  const actionPlanRunner = read('harmony/agent_core/src/main/ets/agent/action/ActionPlanRunner.ets');
+  const layoutMerger = read('harmony/agent_core/src/main/ets/a2ui/A2uiLayoutMerger.ets');
+  const hotelRuntime = read('harmony/agent_core/src/main/ets/aiphone/runtime/HotelToolA2ui.ets');
   const demoEntry = read('harmony/entry/src/main/ets/pages/Index.ets');
   const runtimeDir = resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/runtime');
   const socialHubStart = runtimeGateway.indexOf('async function callLocalSocialHubTool');
@@ -303,29 +307,49 @@ function verifySourceContracts() {
   assertContains(index, "./src/main/ets/skill/SkillSnapshot", 'public export preserves Skill support');
   assertContains(registry, 'private sealed: boolean = false', 'tool registry supports capability sealing');
   assertContains(registry, 'this.ensureMutable()', 'sealed tool registries reject later mutation');
-  assertContains(reactAgent, 'tools: ToolRegistry,', 'ReAct agent requires an explicit tool registry');
-  assertContains(reactAgent, 'tools.seal()', 'ReAct agent seals capabilities during construction');
-  assertContains(reactAgent, 'new ReActAgentRunner(model, tools, maxSteps, uiHandler)', 'ReAct agent delegates loop execution to the shared runner');
-  assertContains(reactAgent, 'private conversation: ConversationContext', 'ReAct agent owns exactly one conversation context');
-  assertContains(reactAgent, 'protected async executeTask', 'ReAct execution is protected from direct UI invocation');
   assertContains(reactRunner, 'options?: ReActRunOptions', 'shared runner accepts an optional role identity');
   assertContains(reactRunner, 'this.buildSystemPrompt(options)', 'shared runner owns the common ReAct output contract');
-  assertContains(leaderRegistry, 'registry.register(new CreateUiTaskTool(bus))', 'Leader registry explicitly injects UI task creation');
-  assertContains(leaderRegistry, 'registry.register(new TimeTool())', 'Leader registry explicitly injects time');
-  assertContains(leaderRegistry, 'registry.register(new SandboxFileWriteTool(context))', 'Leader registry explicitly injects sandbox file writes');
-  assertContains(uiMakerRegistry, 'registry.register(new TimeTool())', 'UImaker registry explicitly injects time');
-  assertContains(uiMakerRegistry, 'registry.register(new UiTool())', 'UImaker registry explicitly injects UI rendering');
-  assertContains(demoEntry, 'new LinkedMessageBus()', 'Loopy entry owns the shared message bus');
-  assertContains(demoEntry, 'new ChatInteractor(this.bus)', 'user interaction is routed through the bus');
-  assertContains(leaderAgent, 'createLeaderToolRegistry(context, bus)', 'Leader fixes its own capability registry');
-  assertContains(uiMakerAgent, 'createUIMakerToolRegistry()', 'UImaker fixes its own capability registry');
-  assertContains(leaderAgent, 'MessageProcessingMode.BATCH_PENDING', 'Leader fixes batch processing as a role invariant');
-  assertContains(uiMakerAgent, 'MessageProcessingMode.ONE_BY_ONE', 'UImaker fixes one-by-one processing as a role invariant');
-  assert(!demoEntry.includes('createLeaderToolRegistry'), 'Loopy entry cannot choose Leader capabilities');
-  assert(!demoEntry.includes('createUIMakerToolRegistry'), 'Loopy entry cannot choose UImaker capabilities');
-  assert(!demoEntry.includes('MessageProcessingMode'), 'Loopy entry cannot choose role scheduling policies');
-  assertContains(demoEntry, 'this.interactor.send(task)', 'user input is written through the bus interactor');
-  assert(!demoEntry.includes('createConfiguredLoopToolRegistry'), 'role agents do not receive the legacy all-capability registry');
+  assertContains(demoEntry, 'Loopy Agent Core', 'Loopy entry is a library status shell');
+  assertContains(demoEntry, 'Leader · Data · UI · Action', 'Loopy entry documents the canonical roles');
+  assert(!demoEntry.includes('@loop/agent-core'), 'Loopy status shell does not instantiate another runtime');
+  assert(!demoEntry.includes('TextInput(') && !demoEntry.includes("Button('Send')"),
+    'Loopy status shell is non-interactive');
+  assert(!index.includes('ReactLinkedMessageBus'), 'public API has no second ReAct bus');
+  assert(!index.includes('ReactLeaderAgent'), 'public API has no second ReAct leader');
+  assert(!index.includes('UIMakerAgent'), 'public API has no UIMaker compatibility agent');
+  assertContains(messageDrivenAgent, 'bus.openReader()', 'all agents subscribe through the single base');
+  for (const [name, source] of [
+    ['Leader', structuredLeader],
+    ['Data', dataAgent],
+    ['UI', uiAgent],
+    ['Action', actionAgent]
+  ]) {
+    assertContains(source, 'extends MessageDrivenAgent', `${name} uses the single subscriber base`);
+  }
+  assertContains(structuredBus, 'reclaimAcknowledged()', 'structured bus reclaims acknowledged messages');
+  assertContains(dataAgent, 'this.authorizer(task)', 'Data authorizes exact tool tasks before execution');
+  assertContains(dataAgent, 'result.toolId === task.toolId && result.outputSchema === task.outputSchema',
+    'Data validates result identity and schema');
+  assertContains(actionAgent, 'type: AgentMessageType.ACTION_OFFERS_READY', 'Action owns immutable offers');
+  assertContains(actionAgent, 'type: AgentMessageType.ACTION_PLAN_DRAFT', 'Action binds Leader plan drafts');
+  assertContains(uiAgent, 'message.type === AgentMessageType.ACTION_OFFERS_READY', 'UI joins data and offers');
+  assertContains(actionAgent, 'this.catalog.validateRegisteredStep', 'Action executes only catalog-registered steps');
+  assertContains(actionPlanRunner, 'resolveJsonPointer(source, bindings[index].path)', 'Action workflow passes prior output by JSON Pointer');
+  assertContains(layoutMerger, "exactKeys(reference, ['offerId'])", 'layout planner can reference only exact offers');
+  assertContains(layoutMerger, 'return baselineJsonl', 'invalid layouts return the deterministic baseline');
+  assertContains(hotelRuntime, 'hotelSearchA2uiFromOffers', 'hotel baseline consumes Action offers');
+
+  const obsoleteAgentFiles = [
+    'AgentMessageTypes.ets', 'CreateUiTaskTool.ets', 'LeaderAgent.ets', 'LeaderAgentPrompt.ets',
+    'LeaderToolRegistry.ets', 'LoopAgentPrompt.ets', 'MessageBus.ets', 'ReActAgent.ets',
+    'StructuredMessageDrivenAgent.ets', 'UIMakerAgent.ets', 'UIMakerAgentPrompt.ets',
+    'UIMakerToolRegistry.ets'
+  ];
+  assert(obsoleteAgentFiles.every((name) =>
+    !existsSync(resolve(repoRoot, 'harmony/agent_core/src/main/ets/agent', name))),
+  'obsolete second runtime files are absent');
+  assert(!existsSync(resolve(repoRoot, 'harmony/entry/src/main/ets/interactor/ChatInteractor.ets')),
+    'obsolete bus interactor is absent');
 }
 
 runHarBuild();
