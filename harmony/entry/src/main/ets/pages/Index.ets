@@ -6,6 +6,7 @@ import {
   AgentMessage,
   createA2uiModelInfo,
   createLoopModelInfo,
+  ensureBundledSkillsInSandbox,
   LeaderAgent,
   LinkedMessageBus,
   MESSAGE_TAG_UI_MAKER,
@@ -60,6 +61,7 @@ struct Index {
   }
 
   aboutToAppear(): void {
+    ensureBundledSkillsInSandbox(this.getAbilityContext()).catch((_error: Error): void => {});
     this.interactor.startListening(
       (message: AgentMessage): void => this.handleBusMessage(message),
       (error: Error): void => {
@@ -199,6 +201,7 @@ struct Index {
     const leader = new LeaderAgent(
       modelInfo.model,
       MAX_STEPS,
+      this.getAbilityContext(),
       this.bus
     );
     const uiMaker = new UIMakerAgent(
