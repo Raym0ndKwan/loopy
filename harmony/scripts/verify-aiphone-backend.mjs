@@ -312,11 +312,12 @@ function verifySourceContracts() {
   assertContains(reactRunner, 'this.buildSystemPrompt(options)', 'shared runner owns the common ReAct output contract');
   assertContains(leaderRegistry, 'registry.register(new CreateUiTaskTool(bus))', 'Leader registry explicitly injects UI task creation');
   assertContains(leaderRegistry, 'registry.register(new TimeTool())', 'Leader registry explicitly injects time');
+  assertContains(leaderRegistry, 'registry.register(new SandboxFileWriteTool(context))', 'Leader registry explicitly injects sandbox file writes');
   assertContains(uiMakerRegistry, 'registry.register(new TimeTool())', 'UImaker registry explicitly injects time');
   assertContains(uiMakerRegistry, 'registry.register(new UiTool())', 'UImaker registry explicitly injects UI rendering');
   assertContains(demoEntry, 'new LinkedMessageBus()', 'Loopy entry owns the shared message bus');
   assertContains(demoEntry, 'new ChatInteractor(this.bus)', 'user interaction is routed through the bus');
-  assertContains(leaderAgent, 'createLeaderToolRegistry(bus)', 'Leader fixes its own capability registry');
+  assertContains(leaderAgent, 'createLeaderToolRegistry(context, bus)', 'Leader fixes its own capability registry');
   assertContains(uiMakerAgent, 'createUIMakerToolRegistry()', 'UImaker fixes its own capability registry');
   assertContains(leaderAgent, 'MessageProcessingMode.BATCH_PENDING', 'Leader fixes batch processing as a role invariant');
   assertContains(uiMakerAgent, 'MessageProcessingMode.ONE_BY_ONE', 'UImaker fixes one-by-one processing as a role invariant');

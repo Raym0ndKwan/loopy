@@ -1,3 +1,4 @@
+import { common } from '@kit.AbilityKit';
 import { AgentEvent, AgentEventKind } from './AgentEvent';
 import {
   MESSAGE_TAG_LEADER,
@@ -18,6 +19,7 @@ export class LeaderAgent extends MessageDrivenAgent {
   constructor(
     model: LocalModel,
     maxSteps: number,
+    context: common.UIAbilityContext,
     bus: MessageBus
   ) {
     super(
@@ -27,7 +29,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       maxSteps,
       bus,
       MessageProcessingMode.BATCH_PENDING,
-      createLeaderToolRegistry(bus)
+      createLeaderToolRegistry(context, bus)
     );
   }
 
