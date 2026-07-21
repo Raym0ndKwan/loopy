@@ -9,7 +9,6 @@ import { ModelScopeTool } from '../modelscope/ModelScopeTool';
 import { SkillReadTool } from '../skill/SkillReadTool';
 import { SkillSnapshot } from '../skill/SkillSnapshot';
 import { AgentTool } from './AgentTool';
-import { TimeTool } from './TimeTool';
 import { UiTool } from './UiTool';
 
 export type ToolRegistryCloseHandler = () => Promise<void>;
@@ -29,13 +28,30 @@ class NoteTool implements AgentTool {
   }
 }
 
+class TimeTool implements AgentTool {
+  name(): string {
+    return 'time';
+  }
+
+  description(): string {
+    return 'Returns the device\'s local date and time.';
+  }
+
+  async run(_input: string): Promise<string> {
+    return new Date().toLocaleString();
+  }
+}
+
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map();
   private closeHandlers: ToolRegistryCloseHandler[] = [];
-  private sealed: boolean = false;
+
+  constructor() {
+    this.register(new NoteTool());
+    this.register(new TimeTool());
+  }
 
   register(tool: AgentTool): void {
-    this.ensureMutable();
     this.tools.set(tool.name(), tool);
   }
 
@@ -44,12 +60,7 @@ export class ToolRegistry {
   }
 
   registerCloseHandler(handler: ToolRegistryCloseHandler): void {
-    this.ensureMutable();
     this.closeHandlers.push(handler);
-  }
-
-  seal(): void {
-    this.sealed = true;
   }
 
   describeTools(): string {
@@ -76,12 +87,6 @@ export class ToolRegistry {
       }
     }
   }
-
-  private ensureMutable(): void {
-    if (this.sealed) {
-      throw new Error('ToolRegistry is sealed and cannot be modified after Agent construction.');
-    }
-  }
 }
 
 export async function createConfiguredLoopToolRegistry(
@@ -105,8 +110,6 @@ export async function createConfiguredLoopToolRegistry(
 
 export function createLoopToolRegistry(skillSnapshot?: SkillSnapshot | null): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.register(new NoteTool());
-  registry.register(new TimeTool());
   registry.register(new UiTool());
   if (skillSnapshot !== undefined && skillSnapshot !== null && !skillSnapshot.isEmpty()) {
     registry.register(new SkillReadTool(skillSnapshot));

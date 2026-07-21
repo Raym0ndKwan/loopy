@@ -1,43 +1,15 @@
 export { ChatMessage, ConversationContext, ConversationRole } from './src/main/ets/agent/ConversationContext';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
-export {
-  MESSAGE_TAG_LEADER,
-  MESSAGE_TAG_UI_MAKER,
-  MESSAGE_TYPE_CONTROL_CLEAR,
-  MESSAGE_TYPE_INPUT,
-  MESSAGE_TYPE_OUTPUT,
-  MESSAGE_TYPE_OTHERS,
-  MESSAGE_TYPE_TASK_CREATE_UI,
-  MESSAGE_TYPE_TASK_RESULT_UI
-} from './src/main/ets/agent/AgentMessageTypes';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
 export { A2uiObservationDigest, summarizeA2uiObservation } from './src/main/ets/agent/A2uiObservationDigest';
-export { CreateUiTaskTool } from './src/main/ets/agent/CreateUiTaskTool';
-export { LeaderAgent } from './src/main/ets/agent/LeaderAgent';
-export { AgentMessage, BusReader, MessageBus, LinkedMessageBus } from './src/main/ets/agent/MessageBus';
-export {
-  AgentRunOutcome,
-  AgentRunOutcomeKind,
-  MessageDrivenAgent,
-  MessageProcessingMode
-} from './src/main/ets/agent/MessageDrivenAgent';
-export { TimeTool } from './src/main/ets/agent/TimeTool';
-export { UIMakerAgent } from './src/main/ets/agent/UIMakerAgent';
 export {
   ToolRegistry,
   ToolRegistryCloseHandler,
   createConfiguredLoopToolRegistry,
   createLoopToolRegistry
 } from './src/main/ets/agent/ToolRegistry';
-export { LOOP_AGENT_IDENTITY_PROMPT } from './src/main/ets/agent/LoopAgentPrompt';
-export { ReActAgent } from './src/main/ets/agent/ReActAgent';
-export {
-  AgentListener,
-  ReActAgentRunner,
-  ReActRunOptions,
-  UiRenderHandler
-} from './src/main/ets/agent/ReActAgentRunner';
+export { ReActAgentRunner, AgentListener, UiRenderHandler } from './src/main/ets/agent/ReActAgentRunner';
 export { LocalModel } from './src/main/ets/model/LocalModel';
 export { LlmProvider } from './src/main/ets/model/LlmProvider';
 export { ScriptedLocalModel } from './src/main/ets/model/ScriptedLocalModel';
@@ -66,6 +38,7 @@ export { LoopBackend, aiphoneToolDescriptionForModel, isExplicitLuckinOrderPromp
 export { LoopBackendCallbacks, LoopBackendRequest, LoopMessage, LoopModelSettings, LoopRunResult, LoopToolTrace } from './src/main/ets/aiphone/LoopBackendTypes';
 export { aiphoneErrorJsonl, aiphoneInfoJsonl, splitJsonl } from './src/main/ets/aiphone/AiphoneA2ui';
 export { runAiphoneTool } from './src/main/ets/aiphone/AiphoneToolExecutor';
+export { AiphoneToolSurfaceCallback, aiphoneToolSurfaceCallback, ignoreSurface } from './src/main/ets/aiphone/AiphoneToolExecutor';
 export { aiphoneToolDefinitionCount, isRegisteredAiphoneToolId } from './src/main/ets/aiphone/AiphoneToolDefinitions';
 export { BackendAvailability, BackendResolution, ToolAuthMode, ToolBackendType, ToolDefinition, ToolRiskLevel } from './src/main/ets/aiphone/runtime/ToolDefinitionTypes';
 export { GMAIL_TOOL_IDS, allToolDefinitions, backendLabel, isCalendarToolId, isGmailToolId, isHotelToolId, isKnownDomainToolId, isLocalAdapterToolId, isMailToolId, isMapsToolId, isMediaToolId, isPaymentToolId, isRideToolId, isYouTubeToolId, resolveBackendForTool, toolDefinitionForToolId } from './src/main/ets/aiphone/runtime/ToolDefinitionRegistry';
