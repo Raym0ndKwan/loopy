@@ -23,6 +23,11 @@ export {
 export { ActionPlanRunner } from './src/main/ets/agent/action/ActionPlanRunner';
 export { ActionAgent } from './src/main/ets/agent/action/ActionAgent';
 export * from './src/main/ets/agent/action/ActionAgentTypes';
+export * from './src/main/ets/agent/action/experimental/ExperimentalJsonSchema';
+export * from './src/main/ets/agent/action/experimental/ExperimentalToolTypes';
+export { ExperimentalToolRegistry } from './src/main/ets/agent/action/experimental/ExperimentalToolRegistry';
+export * from './src/main/ets/agent/action/experimental/FakeWorldState';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFakeTools';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
