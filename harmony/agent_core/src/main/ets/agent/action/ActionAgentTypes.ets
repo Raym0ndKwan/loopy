@@ -9,6 +9,18 @@ import {
   JsonValue
 } from './ActionPlanTypes';
 
+/**
+ * A Leader-issued request for ActionAgent to compose an executable plan.
+ * Tool schemas remain owned by ActionAgent's registry; the bus carries only
+ * the exact capability ids authorized for this request.
+ */
+export interface ActionPlanRequestPayload {
+  actionTaskId: string;
+  uiTaskId: string;
+  query: string;
+  allowedToolIds: string[];
+}
+
 export interface WorkflowRunArgs {
   planId: string;
   runId: string;

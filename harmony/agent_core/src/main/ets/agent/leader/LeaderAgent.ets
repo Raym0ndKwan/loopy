@@ -7,6 +7,7 @@ import {
 import { LinkedMessageBus } from '../message/LinkedMessageBus';
 import {
   InputUserPayload,
+  LeaderActionTask,
   LeaderDataTask,
   LeaderPlan,
   LeaderPlanner,
@@ -17,9 +18,7 @@ import {
 } from './LeaderTypes';
 import { CreateUiTaskPayload } from '../ui/UiAgentTypes';
 import { CreateDataTaskPayload } from '../data/DataAgentTypes';
-import { ActionPlanDraftPayload } from '../action/ActionAgentTypes';
-import { ActionPlanDraft, ActionPlanStep } from '../action/ActionPlanTypes';
-import { cloneJsonValue } from '../action/JsonPointer';
+import { ActionPlanRequestPayload } from '../action/ActionAgentTypes';
 
 interface LeaderTurnState {
   conversationId: string;
@@ -192,10 +191,15 @@ export class LeaderAgent extends MessageDrivenAgent {
     state.uiTaskId = plan.ui.taskId;
     state.dataTaskId = plan.data.taskId;
     state.skillId = plan.skillId;
-    this.publishUiTask(message, plan.ui, plan.data.taskId);
+    this.publishUiTask(
+      message,
+      plan.ui,
+      plan.data.taskId,
+      plan.action === undefined ? '' : plan.action.taskId
+    );
     this.publishDataTask(message, plan.data);
-    if (plan.actionPlan !== undefined) {
-      this.publishActionPlanDraft(message, plan);
+    if (plan.action !== undefined) {
+      this.publishActionPlanRequest(message, plan.ui.taskId, plan.action);
     }
   }
 
@@ -232,7 +236,7 @@ export class LeaderAgent extends MessageDrivenAgent {
       tool.outputSchema !== plan.ui.expectedOutputSchema) {
       return false;
     }
-    if (plan.actionPlan !== undefined && !this.validDraft(plan.actionPlan, plan)) {
+    if (plan.action !== undefined && !this.validActionTask(plan.action, plan)) {
       return false;
     }
     return plan.ui.taskId.trim().length > 0 &&
@@ -267,23 +271,23 @@ export class LeaderAgent extends MessageDrivenAgent {
     return null;
   }
 
-  private validDraft(draft: ActionPlanDraft, plan: LeaderPlan): boolean {
-    if (draft.planId.trim().length === 0 || draft.runId.trim().length === 0 ||
-      draft.label.trim().length === 0 || !Array.isArray(draft.steps) ||
-      draft.steps.length === 0 || draft.steps.length > 5 ||
-      draft.planId === draft.runId || draft.planId === plan.ui.taskId ||
-      draft.planId === plan.data.taskId || draft.runId === plan.ui.taskId ||
-      draft.runId === plan.data.taskId) {
+  private validActionTask(task: LeaderActionTask, plan: LeaderPlan): boolean {
+    if (task === null || task === undefined ||
+      typeof task.taskId !== 'string' || task.taskId.trim().length === 0 ||
+      typeof task.query !== 'string' || task.query.trim().length === 0 ||
+      !Array.isArray(task.allowedToolIds) || task.allowedToolIds.length === 0 ||
+      task.taskId === plan.ui.taskId || task.taskId === plan.data.taskId) {
       return false;
     }
-    const stepIds: Set<string> = new Set<string>();
-    for (let index = 0; index < draft.steps.length; index++) {
-      const step: ActionPlanStep = draft.steps[index];
-      if (step === undefined || step.stepId.trim().length === 0 ||
-        step.actionId.trim().length === 0 || stepIds.has(step.stepId)) {
+    const toolIds: Set<string> = new Set<string>();
+    for (let index = 0; index < task.allowedToolIds.length; index++) {
+      const toolId = task.allowedToolIds[index];
+      const tool = typeof toolId === 'string' ? this.toolMetadata(toolId) : null;
+      if (typeof toolId !== 'string' || toolId.trim().length === 0 ||
+        toolIds.has(toolId) || tool === null || tool.riskLevel === 'blocked') {
         return false;
       }
-      stepIds.add(step.stepId);
+      toolIds.add(toolId);
     }
     return true;
   }
@@ -292,7 +296,12 @@ export class LeaderAgent extends MessageDrivenAgent {
     return this.turnKeyFor(message.conversationId, message.turnId);
   }
 
-  private publishUiTask(input: AgentMessage, task: LeaderUiTask, dataTaskId: string): void {
+  private publishUiTask(
+    input: AgentMessage,
+    task: LeaderUiTask,
+    dataTaskId: string,
+    actionTaskId: string
+  ): void {
     const payload: CreateUiTaskPayload = {
       taskId: task.taskId,
       dataTaskId,
@@ -300,6 +309,9 @@ export class LeaderAgent extends MessageDrivenAgent {
       intent: task.intent,
       expectedOutputSchema: task.expectedOutputSchema
     };
+    if (actionTaskId.length > 0) {
+      payload.actionTaskId = actionTaskId;
+    }
     this.bus.publish({
       type: AgentMessageType.TASK_CREATE_UI,
       conversationId: input.conversationId,
@@ -326,22 +338,22 @@ export class LeaderAgent extends MessageDrivenAgent {
     });
   }
 
-  private publishActionPlanDraft(input: AgentMessage, plan: LeaderPlan): void {
-    const draft: ActionPlanDraft | null = this.cloneDraft(plan.actionPlan as ActionPlanDraft);
-    if (draft === null) {
-      return;
-    }
-    const payload: ActionPlanDraftPayload = {
-      uiTaskId: plan.ui.taskId,
-      dataTaskId: plan.data.taskId,
-      sourceToolId: plan.data.toolId,
-      draft
+  private publishActionPlanRequest(
+    input: AgentMessage,
+    uiTaskId: string,
+    task: LeaderActionTask
+  ): void {
+    const payload: ActionPlanRequestPayload = {
+      actionTaskId: task.taskId,
+      uiTaskId,
+      query: task.query,
+      allowedToolIds: task.allowedToolIds.slice()
     };
     this.bus.publish({
-      type: AgentMessageType.ACTION_PLAN_DRAFT,
+      type: AgentMessageType.ACTION_PLAN_REQUEST,
       conversationId: input.conversationId,
       turnId: input.turnId,
-      taskId: `action-draft:${draft.runId}`,
+      taskId: task.taskId,
       payload
     });
   }
@@ -352,15 +364,6 @@ export class LeaderAgent extends MessageDrivenAgent {
       return '';
     }
     return state.skillId;
-  }
-
-  private cloneDraft(draft: ActionPlanDraft): ActionPlanDraft | null {
-    const cloned = cloneJsonValue(draft as Object);
-    if (!cloned.ok || cloned.value === null || typeof cloned.value !== 'object' ||
-      Array.isArray(cloned.value)) {
-      return null;
-    }
-    return cloned.value as ActionPlanDraft;
   }
 
   private copyPlanningContext(context: LeaderPlanningContext): LeaderPlanningContext {

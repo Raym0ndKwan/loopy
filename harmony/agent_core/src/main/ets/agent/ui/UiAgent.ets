@@ -588,11 +588,14 @@ export class UiAgent extends MessageDrivenAgent {
     const values = payload as Record<string, Object | string | number | boolean | null | undefined>;
     const payloadTaskId = values['taskId'];
     const dataTaskId = values['dataTaskId'];
+    const actionTaskId = values['actionTaskId'];
     const skillId = values['skillId'];
     const intent = values['intent'];
     const expectedOutputSchema = values['expectedOutputSchema'];
     if (typeof payloadTaskId !== 'string' || payloadTaskId !== taskId ||
       typeof dataTaskId !== 'string' || dataTaskId.trim().length === 0 || dataTaskId === taskId ||
+      (actionTaskId !== undefined &&
+        (typeof actionTaskId !== 'string' || actionTaskId.trim().length === 0)) ||
       typeof skillId !== 'string' ||
       typeof intent !== 'string' || intent.trim().length === 0 ||
       typeof expectedOutputSchema !== 'string' || expectedOutputSchema.trim().length === 0) {

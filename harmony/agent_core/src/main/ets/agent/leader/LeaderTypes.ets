@@ -1,5 +1,4 @@
 import { AgentMessage, UserInputPayload } from '../message/AgentMessage';
-import { ActionPlanDraft } from '../action/ActionPlanTypes';
 import { ToolRiskLevel } from '../../aiphone/runtime/ToolDefinitionTypes';
 
 export type InputUserPayload = UserInputPayload;
@@ -17,11 +16,21 @@ export interface LeaderDataTask {
   args: Object;
 }
 
+/**
+ * Describes what ActionAgent should achieve and which registered tools it may
+ * consider. Leader intentionally does not choose steps or data bindings.
+ */
+export interface LeaderActionTask {
+  taskId: string;
+  query: string;
+  allowedToolIds: string[];
+}
+
 export interface LeaderPlan {
   skillId: string;
   ui: LeaderUiTask;
   data: LeaderDataTask;
-  actionPlan?: ActionPlanDraft;
+  action?: LeaderActionTask;
 }
 
 export interface LeaderToolMetadata {
