@@ -26,6 +26,7 @@ export * from './src/main/ets/agent/action/ActionAgentTypes';
 export * from './src/main/ets/agent/action/experimental/ExperimentalJsonSchema';
 export * from './src/main/ets/agent/action/experimental/ExperimentalToolTypes';
 export { ExperimentalToolRegistry } from './src/main/ets/agent/action/experimental/ExperimentalToolRegistry';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanning';
 export * from './src/main/ets/agent/action/experimental/FakeWorldState';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFakeTools';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
