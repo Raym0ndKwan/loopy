@@ -116,7 +116,6 @@ function verifySourceContracts() {
   const aiphoneA2ui = read('harmony/agent_core/src/main/ets/aiphone/AiphoneA2ui.ets');
   const definitions = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolDefinitions.ets');
   const executor = read('harmony/agent_core/src/main/ets/aiphone/AiphoneToolExecutor.ets');
-  const backend = read('harmony/agent_core/src/main/ets/aiphone/LoopBackend.ets');
   const index = read('harmony/agent_core/Index.ets');
   const runtimeDefinitions = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolDefinitionRegistry.ets');
   const runtimeGateway = read('harmony/agent_core/src/main/ets/aiphone/runtime/ToolGatewayClient.ets');
@@ -124,7 +123,6 @@ function verifySourceContracts() {
   const conversationStore = read('harmony/agent_core/src/main/ets/agent/ConversationStore.ets');
   const skillParser = read('harmony/agent_core/src/main/ets/skill/SkillMarkdownParser.ets');
   const skillStore = read('harmony/agent_core/src/main/ets/skill/SkillStore.ets');
-  const runner = read('harmony/agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const genericMcp = read('harmony/agent_core/src/main/ets/aiphone/runtime/GenericMcpClient.ets');
   const modelScope = read('harmony/agent_core/src/main/ets/modelscope/ModelScopeDirectClient.ets');
   const modelScopeSearchStart = modelScope.indexOf('async search(useCase: string)');
@@ -145,7 +143,6 @@ function verifySourceContracts() {
     modelScopeCandidateRollback
   );
   const registry = read('harmony/agent_core/src/main/ets/agent/ToolRegistry.ets');
-  const reactRunner = read('harmony/agent_core/src/main/ets/agent/ReActAgentRunner.ets');
   const messageDrivenAgent = read('harmony/agent_core/src/main/ets/agent/MessageDrivenAgent.ets');
   const structuredBus = read('harmony/agent_core/src/main/ets/agent/message/LinkedMessageBus.ets');
   const structuredLeader = read('harmony/agent_core/src/main/ets/agent/leader/LeaderAgent.ets');
@@ -179,8 +176,8 @@ function verifySourceContracts() {
   assertContains(aiphoneA2ui, 'export function aiphoneInfoJsonl', 'AIPhone final answer helper exists');
   assertContains(aiphoneA2ui, "component: 'InfoRows'", 'final answer helper renders InfoRows');
 
-  const ids = [...definitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
   const runtimeIds = [...runtimeDefinitions.matchAll(/toolId:\s*'([^']+)'/g)].map((match) => match[1]);
+  const ids = runtimeIds.slice();
   const uniqueIds = new Set(ids);
   const runtimeUniqueIds = new Set(runtimeIds);
   assert(ids.length === uniqueIds.size, 'AIPhone tool ids are unique');
@@ -212,7 +209,8 @@ function verifySourceContracts() {
     assert(runtimeUniqueIds.has(id), `runtime registered ${id}`);
   }
   assertContains(definitions, "toolId === 'dynamic.search'", 'dynamic.search is treated as registered');
-  assertContains(definitions, 'return TOOL_DEFINITIONS.length;', 'tool definition count uses source list');
+  assertContains(definitions, 'return runtimeToolDefinitions().length;',
+    'public tool definition count uses the runtime source list');
   assert(ids.every((id) => runtimeUniqueIds.has(id)), 'public and runtime tool registries align');
 
   const runtimeFiles = readdirSync(runtimeDir).filter((name) => name.endsWith('.ets'));
@@ -235,7 +233,8 @@ function verifySourceContracts() {
   assertContains(runtimeGateway, 'async function callLocalCalendarTool', 'runtime includes Calendar execution');
   assertContains(runtimeGateway, 'async function callLocalMapsTool', 'runtime includes Maps execution');
   assertContains(runtimeGateway, 'async function buildDynamicToolJsonl', 'runtime includes dynamic tool execution');
-  assertContains(runtimeGateway, 'gmailBlockedSendA2ui(surfaceId, toolId)', 'runtime blocks Gmail direct send');
+  assertContains(runtimeGateway, 'GMAIL_REPLY_REGISTERED_ACTION_REQUIRED',
+    'runtime keeps Gmail send on the registered current-surface action path');
   assertContains(runtimeGateway, '不会模拟 Gmail 邮件', 'runtime does not simulate Gmail');
   assert(
     socialHubFunction.includes("toolId === 'social.reply.draft'") &&
@@ -246,15 +245,12 @@ function verifySourceContracts() {
     'missing scoped draft branch/call/render or found sendReply'
   );
 
-  assertContains(backend, 'allToolDefinitions()', 'LoopBackend registers AIPhone definitions');
-  assertContains(backend, "registry.register(new AiphoneTool(\n      'dynamic.search'", 'LoopBackend registers dynamic.search');
-  assertContains(backend, 'splitJsonl(jsonl)', 'LoopBackend splits AIPhone JSONL');
-  assertContains(backend, 'this.callbacks.onA2uiJsonl?.(line)', 'LoopBackend emits AIPhone JSONL lines');
-  assertContains(backend, 'runAiphoneTool(', 'LoopBackend delegates tool execution to AIPhone executor');
-  assertContains(backend, 'a2uiLineCount === 0', 'LoopBackend only emits final surface when no tool UI exists');
-  assertContains(backend, 'aiphoneInfoJsonl', 'LoopBackend emits A2UI for plain final answers');
-
-  assertContains(index, 'export { LoopBackend,', 'public export includes LoopBackend');
+  assert(!existsSync(resolve(repoRoot, 'harmony/agent_core/src/main/ets/aiphone/LoopBackend.ets')),
+    'retired LoopBackend file is absent');
+  assert(!existsSync(resolve(repoRoot, 'harmony/agent_core/src/main/ets/agent/ReActAgentRunner.ets')),
+    'retired ReActAgentRunner file is absent');
+  assert(!index.includes('LoopBackend') && !index.includes('ReActAgentRunner'),
+    'public API omits retired orchestration');
   assertContains(index, "export { runAiphoneTool }", 'public export includes runAiphoneTool');
   assertContains(index, 'aiphoneInfoJsonl', 'public export includes final answer helper');
   assertContains(index, 'allToolDefinitions', 'public export includes tool definitions');
@@ -269,7 +265,6 @@ function verifySourceContracts() {
   assertContains(skillParser, 'export function parseSkillMarkdown', 'skill markdown parser is present');
   assertContains(skillStore, 'if (pathExists(targetPath))', 'bundled skills do not overwrite sandbox files');
   assertContains(skillStore, 'await ensureBundledSkillsInSandbox(context)', 'sandbox skills are initialized before loading');
-  assertContains(runner, 'AgentEventKind.SKILL', 'ReAct emits selected skills');
   assertContains(genericMcp, 'annotations: tool.annotations', 'MCP annotations are preserved');
   assertContains(modelScope, "from '../aiphone/runtime/GenericMcpClient'", 'ModelScope reuses GenericMcpClient');
   assertContains(modelScope, 'annotations.readOnlyHint !== true', 'ModelScope requires explicit read-only annotations');
@@ -300,15 +295,12 @@ function verifySourceContracts() {
   assert(!/飞常准|12306|天气|weather|searchFlightsByDepArr|searchFlightItineraries|getFlightPriceByCities/i.test(modelScope), 'ModelScope has no domain-specific routing');
   assert(!existsSync(streamablePath), 'ModelScope does not duplicate MCP transport');
   assertContains(registry, 'new ModelScopeTool', 'configured registry exposes ModelScope');
-  assertContains(runner, "this.tools.has('modelscope')", 'ModelScope prompt is gated by actual registration');
   assertContains(index, "./src/main/ets/modelscope/ModelScopeTool", 'public export includes ModelScope');
   assert(!legacySocialPaths.some((path) => existsSync(path)), 'obsolete social bridge files are absent');
   assertContains(index, "./src/main/ets/agent/ConversationStore", 'public export preserves conversation persistence');
   assertContains(index, "./src/main/ets/skill/SkillSnapshot", 'public export preserves Skill support');
   assertContains(registry, 'private sealed: boolean = false', 'tool registry supports capability sealing');
   assertContains(registry, 'this.ensureMutable()', 'sealed tool registries reject later mutation');
-  assertContains(reactRunner, 'options?: ReActRunOptions', 'shared runner accepts an optional role identity');
-  assertContains(reactRunner, 'this.buildSystemPrompt(options)', 'shared runner owns the common ReAct output contract');
   assertContains(demoEntry, 'Loopy Agent Core', 'Loopy entry is a library status shell');
   assertContains(demoEntry, 'Leader · Data · UI · Action', 'Loopy entry documents the canonical roles');
   assert(!demoEntry.includes('@loop/agent-core'), 'Loopy status shell does not instantiate another runtime');
