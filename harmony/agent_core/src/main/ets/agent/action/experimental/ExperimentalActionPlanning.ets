@@ -1,4 +1,5 @@
 import { ExperimentalToolSpec } from './ExperimentalToolTypes';
+import { ExperimentalProposedActionPlan } from './ExperimentalProposedActionPlan';
 
 /**
  * Fully resolved input for the experimental Action planning boundary.
@@ -24,8 +25,28 @@ export interface ExperimentalActionPlanningRequest {
  * chain.
  */
 export interface ExperimentalActionPlanRequestHandler {
-  handle(request: ExperimentalActionPlanningRequest): Promise<void>;
+  handle(
+    request: ExperimentalActionPlanningRequest
+  ): Promise<ExperimentalActionPlanningResult>;
 }
+
+export interface ExperimentalActionPlanProposalResult {
+  status: 'proposal';
+  proposal: ExperimentalProposedActionPlan;
+}
+
+export type ExperimentalActionPlanningFailureKind =
+  'not_implemented' | 'model' | 'protocol';
+
+export interface ExperimentalActionPlanningFailure {
+  status: 'failure';
+  failureKind: ExperimentalActionPlanningFailureKind;
+  errorCode: string;
+  message: string;
+}
+
+export type ExperimentalActionPlanningResult =
+  ExperimentalActionPlanProposalResult | ExperimentalActionPlanningFailure;
 
 /**
  * Default placeholder used by experiments that want to observe the complete
@@ -33,7 +54,15 @@ export interface ExperimentalActionPlanRequestHandler {
  */
 export class EmptyExperimentalActionPlanRequestHandler
 implements ExperimentalActionPlanRequestHandler {
-  handle(_request: ExperimentalActionPlanningRequest): Promise<void> {
-    return Promise.resolve();
+  handle(
+    _request: ExperimentalActionPlanningRequest
+  ): Promise<ExperimentalActionPlanningResult> {
+    const failure: ExperimentalActionPlanningFailure = {
+      status: 'failure',
+      failureKind: 'not_implemented',
+      errorCode: 'ACTION_PLAN_HANDLER_NOT_IMPLEMENTED',
+      message: 'Experimental Action Plan handler is not implemented.'
+    };
+    return Promise.resolve(failure);
   }
 }

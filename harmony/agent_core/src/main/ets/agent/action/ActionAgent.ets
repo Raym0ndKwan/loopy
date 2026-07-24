@@ -41,8 +41,11 @@ import {
 import { cloneJsonValue } from './JsonPointer';
 import {
   ExperimentalActionPlanningRequest,
+  ExperimentalActionPlanningResult,
   ExperimentalActionPlanRequestHandler
 } from './experimental/ExperimentalActionPlanning';
+import { parseExperimentalProposedActionPlan } from
+  './experimental/ExperimentalProposedActionPlanParser';
 import { ExperimentalToolRegistry } from './experimental/ExperimentalToolRegistry';
 import { ExperimentalToolSpec } from './experimental/ExperimentalToolTypes';
 
@@ -325,12 +328,39 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       query: payload.query,
       tools
     };
+    let result: ExperimentalActionPlanningResult;
     try {
-      await handler.handle(request);
+      result = await handler.handle(request);
     } catch (_error) {
-      // The planning failure protocol will be introduced together with the
-      // frozen plan result. For now, fail closed without emitting an unrelated
-      // ACTION.RESULT execution message.
+      // A Bus-level planning failure message will be introduced with frozen
+      // plan handling. Do not emit the unrelated execution ACTION.RESULT.
+      return;
+    }
+    const resultObject = result as Object;
+    if (resultObject === null ||
+      typeof resultObject !== 'object' ||
+      Array.isArray(resultObject)) {
+      return;
+    }
+    if (result.status === 'failure') {
+      if (Object.keys(resultObject).sort().join(',') !==
+          'errorCode,failureKind,message,status' ||
+        (result.failureKind !== 'not_implemented' &&
+          result.failureKind !== 'model' &&
+          result.failureKind !== 'protocol') ||
+        !nonempty(result.errorCode) ||
+        !nonempty(result.message)) {
+        return;
+      }
+      return;
+    }
+    if (result.status !== 'proposal' ||
+      Object.keys(resultObject).sort().join(',') !== 'proposal,status') {
+      return;
+    }
+    const parsed = parseExperimentalProposedActionPlan(result.proposal as Object);
+    if (!parsed.ok) {
+      return;
     }
   }
 
