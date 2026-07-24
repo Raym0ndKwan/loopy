@@ -37,6 +37,15 @@ export { ExperimentalActionPlanResultValidator } from './src/main/ets/agent/acti
 export { ExperimentalActionPlanValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValidator';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlan';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanStore';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanToolSchema';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanPrompt';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanningModel';
+export {
+  OpenAiCompatibleExperimentalActionPlanningModel,
+  parseExperimentalActionPlanningToolCallResponse
+} from './src/main/ets/agent/action/experimental/OpenAiCompatibleExperimentalActionPlanningModel';
+export { LlmExperimentalActionPlanRequestHandler } from './src/main/ets/agent/action/experimental/LlmExperimentalActionPlanRequestHandler';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanHandlerFactory';
 export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanning';
 export * from './src/main/ets/agent/action/experimental/FakeWorldState';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFakeTools';
