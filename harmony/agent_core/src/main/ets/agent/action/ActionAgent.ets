@@ -46,6 +46,12 @@ import {
 } from './experimental/ExperimentalActionPlanning';
 import { ExperimentalActionPlanValidator } from
   './experimental/ExperimentalActionPlanValidator';
+import {
+  ExperimentalFrozenActionPlan,
+  ExperimentalFrozenActionPlanFactory
+} from './experimental/ExperimentalFrozenActionPlan';
+import { ExperimentalFrozenActionPlanStore } from
+  './experimental/ExperimentalFrozenActionPlanStore';
 import { parseExperimentalProposedActionPlan } from
   './experimental/ExperimentalProposedActionPlanParser';
 import { ExperimentalToolRegistry } from './experimental/ExperimentalToolRegistry';
@@ -173,6 +179,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly experimentalPlanRequestHandler:
     ExperimentalActionPlanRequestHandler | null;
   private readonly experimentalPlanValidator: ExperimentalActionPlanValidator | null;
+  private readonly experimentalFrozenPlanFactory:
+    ExperimentalFrozenActionPlanFactory | null;
+  private readonly experimentalFrozenPlans: ExperimentalFrozenActionPlanStore =
+    new ExperimentalFrozenActionPlanStore(LIVE_RUN_LIMIT);
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -208,6 +218,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.experimentalPlanRequestHandler = experimentalPlanRequestHandler ?? null;
     this.experimentalPlanValidator = experimentalToolRegistry === undefined ?
       null : new ExperimentalActionPlanValidator(experimentalToolRegistry);
+    this.experimentalFrozenPlanFactory = experimentalToolRegistry === undefined ?
+      null : new ExperimentalFrozenActionPlanFactory(experimentalToolRegistry);
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -231,6 +243,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.canceledTurns.clear();
     this.observedDataTasks.clear();
     this.pendingDrafts.clear();
+    this.experimentalFrozenPlans.clear();
+  }
+
+  inspectExperimentalFrozenPlan(
+    conversationId: string,
+    turnId: string,
+    actionTaskId: string
+  ): ExperimentalFrozenActionPlan | null {
+    return this.experimentalFrozenPlans.find(
+      conversationId,
+      turnId,
+      actionTaskId
+    );
   }
 
   inspectPausedRun(
@@ -313,11 +338,20 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     const registry = this.experimentalToolRegistry;
     const handler = this.experimentalPlanRequestHandler;
     const validator = this.experimentalPlanValidator;
-    if (registry === null || handler === null || validator === null) {
+    const factory = this.experimentalFrozenPlanFactory;
+    if (registry === null || handler === null ||
+      validator === null || factory === null) {
       return;
     }
     const payload = this.actionPlanRequestPayload(message.payload, message.taskId);
     if (payload === null) {
+      return;
+    }
+    if (this.experimentalFrozenPlans.has(
+      message.conversationId,
+      message.turnId,
+      payload.actionTaskId
+    )) {
       return;
     }
     let tools: ExperimentalToolSpec[];
@@ -372,6 +406,19 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     if (!validation.ok) {
       return;
     }
+    const frozen = factory.freeze(
+      payload.actionTaskId,
+      parsed.plan,
+      validation.topologicalNodeIds
+    );
+    if (!frozen.ok || frozen.plan === null) {
+      return;
+    }
+    this.experimentalFrozenPlans.save(
+      message.conversationId,
+      message.turnId,
+      frozen.plan
+    );
   }
 
   async execute(
@@ -1030,6 +1077,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   private cancelTurn(message: AgentMessage): void {
     this.rememberCanceledTurn(message.conversationId, message.turnId);
+    this.experimentalFrozenPlans.removeTurn(
+      message.conversationId,
+      message.turnId
+    );
     this.observedDataTasks.forEach((task: ObservedDataTask, key: string) => {
       if (task.conversationId === message.conversationId && task.turnId === message.turnId) {
         this.observedDataTasks.delete(key);

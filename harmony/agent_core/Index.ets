@@ -35,6 +35,8 @@ export { ExperimentalActionPlanDagValidator } from './src/main/ets/agent/action/
 export { ExperimentalActionPlanParameterValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanParameterValidator';
 export { ExperimentalActionPlanResultValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanResultValidator';
 export { ExperimentalActionPlanValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValidator';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlan';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanStore';
 export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanning';
 export * from './src/main/ets/agent/action/experimental/FakeWorldState';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFakeTools';
