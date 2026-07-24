@@ -23,6 +23,34 @@ export {
 export { ActionPlanRunner } from './src/main/ets/agent/action/ActionPlanRunner';
 export { ActionAgent } from './src/main/ets/agent/action/ActionAgent';
 export * from './src/main/ets/agent/action/ActionAgentTypes';
+export * from './src/main/ets/agent/action/experimental/ExperimentalJsonSchema';
+export * from './src/main/ets/agent/action/experimental/ExperimentalToolTypes';
+export { ExperimentalToolRegistry } from './src/main/ets/agent/action/experimental/ExperimentalToolRegistry';
+export * from './src/main/ets/agent/action/experimental/ExperimentalProposedActionPlan';
+export * from './src/main/ets/agent/action/experimental/ExperimentalProposedActionPlanParser';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValidationTypes';
+export * from './src/main/ets/agent/action/experimental/ExperimentalSchemaCompatibility';
+export { ExperimentalToolAuthorizationValidator } from './src/main/ets/agent/action/experimental/ExperimentalToolAuthorizationValidator';
+export { ExperimentalActionPlanDagValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanDagValidator';
+export { ExperimentalActionPlanParameterValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanParameterValidator';
+export { ExperimentalActionPlanResultValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanResultValidator';
+export { ExperimentalActionPlanValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValidator';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlan';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanStore';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValueResolver';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanRunner';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanToolSchema';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanPrompt';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanningModel';
+export {
+  OpenAiCompatibleExperimentalActionPlanningModel,
+  parseExperimentalActionPlanningToolCallResponse
+} from './src/main/ets/agent/action/experimental/OpenAiCompatibleExperimentalActionPlanningModel';
+export { LlmExperimentalActionPlanRequestHandler } from './src/main/ets/agent/action/experimental/LlmExperimentalActionPlanRequestHandler';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanHandlerFactory';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanning';
+export * from './src/main/ets/agent/action/experimental/FakeWorldState';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFakeTools';
 export { clearStoredConversation, loadConversation, saveConversation } from './src/main/ets/agent/ConversationStore';
 export { AgentEvent, AgentEventKind } from './src/main/ets/agent/AgentEvent';
 export { AgentTool } from './src/main/ets/agent/AgentTool';
