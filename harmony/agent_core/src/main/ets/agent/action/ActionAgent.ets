@@ -44,6 +44,8 @@ import {
   ExperimentalActionPlanningResult,
   ExperimentalActionPlanRequestHandler
 } from './experimental/ExperimentalActionPlanning';
+import { ExperimentalActionPlanValidator } from
+  './experimental/ExperimentalActionPlanValidator';
 import { parseExperimentalProposedActionPlan } from
   './experimental/ExperimentalProposedActionPlanParser';
 import { ExperimentalToolRegistry } from './experimental/ExperimentalToolRegistry';
@@ -170,6 +172,7 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly experimentalToolRegistry: ExperimentalToolRegistry | null;
   private readonly experimentalPlanRequestHandler:
     ExperimentalActionPlanRequestHandler | null;
+  private readonly experimentalPlanValidator: ExperimentalActionPlanValidator | null;
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -203,6 +206,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.registeredExecutor = executor;
     this.experimentalToolRegistry = experimentalToolRegistry ?? null;
     this.experimentalPlanRequestHandler = experimentalPlanRequestHandler ?? null;
+    this.experimentalPlanValidator = experimentalToolRegistry === undefined ?
+      null : new ExperimentalActionPlanValidator(experimentalToolRegistry);
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -307,7 +312,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private async handleExperimentalPlanRequest(message: AgentMessage): Promise<void> {
     const registry = this.experimentalToolRegistry;
     const handler = this.experimentalPlanRequestHandler;
-    if (registry === null || handler === null) {
+    const validator = this.experimentalPlanValidator;
+    if (registry === null || handler === null || validator === null) {
       return;
     }
     const payload = this.actionPlanRequestPayload(message.payload, message.taskId);
@@ -360,6 +366,10 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     }
     const parsed = parseExperimentalProposedActionPlan(result.proposal as Object);
     if (!parsed.ok) {
+      return;
+    }
+    const validation = validator.validate(parsed.plan, payload.allowedToolIds);
+    if (!validation.ok) {
       return;
     }
   }
