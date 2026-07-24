@@ -21,6 +21,16 @@ export interface ActionPlanRequestPayload {
   allowedToolIds: string[];
 }
 
+export interface ExperimentalActionRunPayload {
+  actionTaskId: string;
+}
+
+export interface ExperimentalActionPlanReadyPayload {
+  actionTaskId: string;
+  label: string;
+  status: 'ready';
+}
+
 export interface WorkflowRunArgs {
   planId: string;
   runId: string;

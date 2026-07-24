@@ -7,9 +7,7 @@ export interface ExperimentalToolExecutionContext {
   conversationId: string;
   turnId: string;
   actionTaskId: string;
-  planId: string;
-  runId: string;
-  stepId: string;
+  nodeId: string;
   nowIso: string;
 }
 

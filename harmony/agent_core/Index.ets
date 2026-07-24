@@ -37,6 +37,8 @@ export { ExperimentalActionPlanResultValidator } from './src/main/ets/agent/acti
 export { ExperimentalActionPlanValidator } from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValidator';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlan';
 export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanStore';
+export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanValueResolver';
+export * from './src/main/ets/agent/action/experimental/ExperimentalFrozenActionPlanRunner';
 export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanToolSchema';
 export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanPrompt';
 export * from './src/main/ets/agent/action/experimental/ExperimentalActionPlanningModel';

@@ -15,6 +15,8 @@ import {
   ActionProgressPayload,
   ActionResultPayload,
   ActionRunPayload,
+  ExperimentalActionPlanReadyPayload,
+  ExperimentalActionRunPayload,
   PausedActionRun,
   RegisteredActionExecutor,
   WorkflowRunArgs
@@ -50,6 +52,12 @@ import {
   ExperimentalFrozenActionPlan,
   ExperimentalFrozenActionPlanFactory
 } from './experimental/ExperimentalFrozenActionPlan';
+import {
+  ExperimentalActionPlanProgress,
+  ExperimentalActionPlanProgressObserver,
+  ExperimentalActionPlanRunResult,
+  ExperimentalFrozenActionPlanRunner
+} from './experimental/ExperimentalFrozenActionPlanRunner';
 import { ExperimentalFrozenActionPlanStore } from
   './experimental/ExperimentalFrozenActionPlanStore';
 import { parseExperimentalProposedActionPlan } from
@@ -108,6 +116,36 @@ interface StoredActionDraft {
   dataTaskId: string;
   sourceToolId: string;
   draft: ActionPlanDraft;
+}
+
+class ExperimentalProgressPublisher
+implements ExperimentalActionPlanProgressObserver {
+  private readonly bus: LinkedMessageBus;
+  private readonly conversationId: string;
+  private readonly turnId: string;
+  private readonly actionTaskId: string;
+
+  constructor(
+    bus: LinkedMessageBus,
+    conversationId: string,
+    turnId: string,
+    actionTaskId: string
+  ) {
+    this.bus = bus;
+    this.conversationId = conversationId;
+    this.turnId = turnId;
+    this.actionTaskId = actionTaskId;
+  }
+
+  onProgress(progress: ExperimentalActionPlanProgress): void {
+    this.bus.publish({
+      type: AgentMessageType.ACTION_PROGRESS,
+      conversationId: this.conversationId,
+      turnId: this.turnId,
+      taskId: this.actionTaskId,
+      payload: progress
+    });
+  }
 }
 
 function nonempty(value: string | undefined): boolean {
@@ -181,8 +219,14 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
   private readonly experimentalPlanValidator: ExperimentalActionPlanValidator | null;
   private readonly experimentalFrozenPlanFactory:
     ExperimentalFrozenActionPlanFactory | null;
+  private readonly experimentalFrozenPlanRunner:
+    ExperimentalFrozenActionPlanRunner | null;
   private readonly experimentalFrozenPlans: ExperimentalFrozenActionPlanStore =
     new ExperimentalFrozenActionPlanStore(LIVE_RUN_LIMIT);
+  private readonly experimentalActiveRuns: Set<string> = new Set<string>();
+  private readonly experimentalTerminalRuns:
+    Map<string, ExperimentalActionPlanRunResult> =
+      new Map<string, ExperimentalActionPlanRunResult>();
   private readonly runner: ActionPlanRunner;
   private readonly readyRuns: Map<string, StoredActionRun> =
     new Map<string, StoredActionRun>();
@@ -220,6 +264,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       null : new ExperimentalActionPlanValidator(experimentalToolRegistry);
     this.experimentalFrozenPlanFactory = experimentalToolRegistry === undefined ?
       null : new ExperimentalFrozenActionPlanFactory(experimentalToolRegistry);
+    this.experimentalFrozenPlanRunner = experimentalToolRegistry === undefined ?
+      null : new ExperimentalFrozenActionPlanRunner(experimentalToolRegistry);
     this.runner = new ActionPlanRunner(catalog, this);
   }
 
@@ -244,6 +290,8 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     this.observedDataTasks.clear();
     this.pendingDrafts.clear();
     this.experimentalFrozenPlans.clear();
+    this.experimentalActiveRuns.clear();
+    this.experimentalTerminalRuns.clear();
   }
 
   inspectExperimentalFrozenPlan(
@@ -319,6 +367,11 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       }
       if (message.type === AgentMessageType.TASK_RESULT_UI) {
         this.bindDrafts(message);
+        return;
+      }
+      if (message.type === AgentMessageType.ACTION_RUN &&
+        this.hasExperimentalActionTaskId(message.payload)) {
+        this.startExperimentalRun(message);
         return;
       }
       this.startRun(message);
@@ -414,11 +467,168 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     if (!frozen.ok || frozen.plan === null) {
       return;
     }
-    this.experimentalFrozenPlans.save(
+    const saved = this.experimentalFrozenPlans.save(
       message.conversationId,
       message.turnId,
       frozen.plan
     );
+    if (!saved.ok) {
+      return;
+    }
+    const ready: ExperimentalActionPlanReadyPayload = {
+      actionTaskId: frozen.plan.actionTaskId,
+      label: frozen.plan.label,
+      status: 'ready'
+    };
+    this.bus.publish({
+      type: AgentMessageType.ACTION_PLAN_READY,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: frozen.plan.actionTaskId,
+      payload: ready
+    });
+  }
+
+  private startExperimentalRun(message: AgentMessage): void {
+    const runner = this.experimentalFrozenPlanRunner;
+    const payload = this.experimentalActionRunPayload(message.payload, message.taskId);
+    if (runner === null || payload === null) {
+      this.publishExperimentalRunError(
+        message,
+        this.payloadString(message.payload, 'actionTaskId'),
+        'ACTION_PLAN_RUN_INVALID',
+        'Experimental Action run payload is malformed.'
+      );
+      return;
+    }
+    const key = this.experimentalRunKey(
+      message.conversationId,
+      message.turnId,
+      payload.actionTaskId
+    );
+    const terminal = this.experimentalTerminalRuns.get(key);
+    if (terminal !== undefined) {
+      this.publishExperimentalRunResult(message, terminal);
+      return;
+    }
+    if (this.experimentalActiveRuns.has(key)) {
+      this.publishExperimentalRunError(
+        message,
+        payload.actionTaskId,
+        'ACTION_PLAN_RUN_DUPLICATE',
+        'Experimental Action plan is already running.'
+      );
+      return;
+    }
+    const plan = this.experimentalFrozenPlans.find(
+      message.conversationId,
+      message.turnId,
+      payload.actionTaskId
+    );
+    if (plan === null) {
+      this.publishExperimentalRunError(
+        message,
+        payload.actionTaskId,
+        'ACTION_PLAN_NOT_READY',
+        'No frozen Action plan exists for this actionTaskId.'
+      );
+      return;
+    }
+    this.experimentalActiveRuns.add(key);
+    const generation = this.generation;
+    const observer = new ExperimentalProgressPublisher(
+      this.bus,
+      message.conversationId,
+      message.turnId,
+      payload.actionTaskId
+    );
+    runner.run(plan, {
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      actionTaskId: payload.actionTaskId,
+      nowIso: new Date().toISOString()
+    }, observer)
+      .then((result: ExperimentalActionPlanRunResult) => {
+        this.finishExperimentalRun(message, key, generation, result);
+      })
+      .catch((_error: Object) => {
+        this.finishExperimentalRun(message, key, generation, {
+          status: 'error',
+          actionTaskId: payload.actionTaskId,
+          completedNodeIds: [],
+          nodeOutputs: [],
+          failedNodeId: '',
+          errorCode: 'ACTION_PLAN_RUN_FAILED',
+          message: 'Experimental Action plan execution failed closed.'
+        });
+      });
+  }
+
+  private finishExperimentalRun(
+    message: AgentMessage,
+    key: string,
+    generation: number,
+    result: ExperimentalActionPlanRunResult
+  ): void {
+    if (!this.experimentalActiveRuns.has(key) ||
+      !this.active ||
+      generation !== this.generation) {
+      return;
+    }
+    this.experimentalActiveRuns.delete(key);
+    const cloned = cloneJsonValue(result as Object);
+    if (!cloned.ok || cloned.value === undefined ||
+      cloned.value === null || typeof cloned.value !== 'object' ||
+      Array.isArray(cloned.value)) {
+      this.publishExperimentalRunError(
+        message,
+        result.actionTaskId,
+        'ACTION_PLAN_RESULT_INVALID',
+        'Experimental Action plan result could not be copied safely.'
+      );
+      return;
+    }
+    const terminal = cloned.value as ExperimentalActionPlanRunResult;
+    this.experimentalTerminalRuns.set(key, terminal);
+    this.publishExperimentalRunResult(message, terminal);
+  }
+
+  private publishExperimentalRunResult(
+    message: AgentMessage,
+    result: ExperimentalActionPlanRunResult
+  ): void {
+    const cloned = cloneJsonValue(result as Object);
+    const payload = cloned.ok &&
+      cloned.value !== undefined &&
+      cloned.value !== null &&
+      typeof cloned.value === 'object' &&
+      !Array.isArray(cloned.value) ?
+      cloned.value as ExperimentalActionPlanRunResult : result;
+    this.bus.publish({
+      type: AgentMessageType.ACTION_RESULT,
+      conversationId: message.conversationId,
+      turnId: message.turnId,
+      taskId: result.actionTaskId,
+      payload
+    });
+  }
+
+  private publishExperimentalRunError(
+    message: AgentMessage,
+    actionTaskId: string,
+    errorCode: string,
+    detail: string
+  ): void {
+    const result: ExperimentalActionPlanRunResult = {
+      status: 'error',
+      actionTaskId,
+      completedNodeIds: [],
+      nodeOutputs: [],
+      failedNodeId: '',
+      errorCode,
+      message: detail
+    };
+    this.publishExperimentalRunResult(message, result);
   }
 
   async execute(
@@ -1081,6 +1291,30 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
       message.conversationId,
       message.turnId
     );
+    const experimentalPrefix = this.experimentalTurnPrefix(
+      message.conversationId,
+      message.turnId
+    );
+    const activeExperimental: string[] = [];
+    this.experimentalActiveRuns.forEach((key: string) => {
+      if (key.startsWith(experimentalPrefix)) {
+        activeExperimental.push(key);
+      }
+    });
+    for (let index = 0; index < activeExperimental.length; index++) {
+      this.experimentalActiveRuns.delete(activeExperimental[index]);
+    }
+    const terminalExperimental: string[] = [];
+    this.experimentalTerminalRuns.forEach(
+      (_result: ExperimentalActionPlanRunResult, key: string) => {
+        if (key.startsWith(experimentalPrefix)) {
+          terminalExperimental.push(key);
+        }
+      }
+    );
+    for (let index = 0; index < terminalExperimental.length; index++) {
+      this.experimentalTerminalRuns.delete(terminalExperimental[index]);
+    }
     this.observedDataTasks.forEach((task: ObservedDataTask, key: string) => {
       if (task.conversationId === message.conversationId && task.turnId === message.turnId) {
         this.observedDataTasks.delete(key);
@@ -1489,6 +1723,29 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
     return current;
   }
 
+  private hasExperimentalActionTaskId(payload: Object): boolean {
+    return payload !== null &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      Object.keys(payload).indexOf('actionTaskId') >= 0;
+  }
+
+  private experimentalActionRunPayload(
+    payload: Object,
+    messageTaskId: string
+  ): ExperimentalActionRunPayload | null {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload) ||
+      Object.keys(payload).sort().join(',') !== 'actionTaskId') {
+      return null;
+    }
+    const current = payload as ExperimentalActionRunPayload;
+    if (!nonempty(current.actionTaskId) ||
+      current.actionTaskId !== messageTaskId) {
+      return null;
+    }
+    return current;
+  }
+
   private validDraft(draft: ActionPlanDraft): boolean {
     if (Object.keys(draft).sort().join(',') !== 'label,planId,runId,steps' ||
       !nonempty(draft.planId) || !nonempty(draft.runId) ||
@@ -1679,6 +1936,20 @@ export class ActionAgent extends MessageDrivenAgent implements ActionStepExecuto
 
   private turnKey(conversationId: string, turnId: string): string {
     return `${conversationId.length}:${conversationId}${turnId}`;
+  }
+
+  private experimentalRunKey(
+    conversationId: string,
+    turnId: string,
+    actionTaskId: string
+  ): string {
+    return `${this.experimentalTurnPrefix(conversationId, turnId)}` +
+      `${actionTaskId.length}:${actionTaskId}`;
+  }
+
+  private experimentalTurnPrefix(conversationId: string, turnId: string): string {
+    return `${conversationId.length}:${conversationId}` +
+      `${turnId.length}:${turnId}`;
   }
 
   private dataTaskKey(conversationId: string, turnId: string, taskId: string): string {
